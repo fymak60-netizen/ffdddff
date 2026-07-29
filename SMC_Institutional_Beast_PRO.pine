@@ -1,0 +1,604 @@
+//@version=6
+// ══════════════════════════════════════════════════════════════════════════════════════
+//  🐉 SMC INSTITUTIONAL BEAST PRO — الوحش المؤسسي — v6.0
+//  ─────────────────────────────────────────────────────────────────────────────────────
+//  نظام ذكاء الأموال المؤسسي الكامل للفوركس، مبني على المدارس الخفية:
+//
+//   1) Market Microstructure  → محاكاة عدم توازن تدفق الأوامر (OFI Proxy / Implied Delta)
+//   2) Smart Money Concepts   → BOS / CHoCH / Order Blocks / Liquidity Sweeps
+//   3) IPDA / Liquidity Voids → Fair Value Gaps مع تتبع التعبئة (Mitigation) لحظياً
+//   4) HFT Momentum           → شموع الاجتياح (Displacement) التي تسبقها السيولة
+//   5) Kill Zones             → لندن / نيويورك / آسيا (بتوقيت UTC قابل للتعديل)
+//
+//  • خالٍ من المؤشرات التقليدية — لا موفينج، لا MACD، لا RSI. سلوك سعري خالص + تدفق.
+//  • محرك إشارات Confluence Scoring من 100 نقطة مع فلترة HTF وفترة تهدئة.
+//  • Repaint-Safe: البيفوتات مؤكدة، والبيانات الأعلى زمناً مزاحة بشمعة [1] + lookahead_on.
+//  • لوحة قيادة مؤسسية حية (Dashboard) تشبه شاشات غرف التداول.
+//
+//  الإعداد المقترح: فريم الدخول 1m/5m/15m — فريم السياق HTF = 240 أو D — أزواج الفوركس الرئيسية.
+// ══════════════════════════════════════════════════════════════════════════════════════
+
+indicator("🐉 SMC Institutional Beast PRO — الوحش المؤسسي", "SMC Beast PRO 🐉", overlay = true,
+  max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500, max_bars_back = 1000)
+
+// ══════════════════════════════ المدخلات | INPUTS ══════════════════════════════
+
+string G_STRUCT = "🏛️ هيكل السوق | Market Structure"
+int   swLen     = input.int(5, "طول بيفوت الهيكل الرئيسي (Swing)", minval = 2, maxval = 50, group = G_STRUCT)
+int   inLen     = input.int(3, "طول بيفوت الهيكل الداخلي (Internal)", minval = 1, maxval = 20, group = G_STRUCT)
+bool  showSwing = input.bool(true,  "إظهار الهيكل الرئيسي BOS/CHoCH", group = G_STRUCT)
+bool  showIntrn = input.bool(true,  "إظهار الهيكل الداخلي BOS/CHoCH", group = G_STRUCT)
+color swBullCss = input.color(#00c853, "لون الصعود (Swing)", group = G_STRUCT)
+color swBearCss = input.color(#ff1744, "لون الهبوط (Swing)", group = G_STRUCT)
+color inBullCss = input.color(#69f0ae, "لون الصعود (Internal)", group = G_STRUCT)
+color inBearCss = input.color(#ff8a80, "لون الهبوط (Internal)", group = G_STRUCT)
+
+string G_FVG    = "🕳️ الفراغات السعرية | Fair Value Gaps (Liquidity Voids)"
+bool  showFVG   = input.bool(true, "إظهار الفراغات السعرية FVG", group = G_FVG)
+float minFvgAtr = input.float(0.15, "أدنى حجم للفجوة (× ATR)", minval = 0.0, step = 0.05, group = G_FVG)
+int   maxFVG    = input.int(12, "أقصى عدد فجوات ظاهرة لكل اتجاه", minval = 2, maxval = 50, group = G_FVG)
+color fvgBull   = input.color(#00b8d4, "فجوة شرائية", group = G_FVG)
+color fvgBear   = input.color(#ff9100, "فجوة بيعية", group = G_FVG)
+
+string G_OB    = "🧱 الكتل الطلبية | Order Blocks"
+bool  showOB   = input.bool(true, "إظهار الكتل الطلبية OB", group = G_OB)
+int   obLook   = input.int(15, "عمق البحث عن الشمعة المؤسسية (شموع)", minval = 5, maxval = 40, group = G_OB)
+int   maxOB    = input.int(8, "أقصى عدد كتل ظاهرة لكل اتجاه", minval = 1, maxval = 30, group = G_OB)
+color obBullCss = input.color(#2962ff, "كتلة شرائية (Demand)", group = G_OB)
+color obBearCss = input.color(#d50000, "كتلة بيعية (Supply)", group = G_OB)
+
+string G_LIQ     = "💧 السيولة | Liquidity Engine"
+bool  showSweep  = input.bool(true, "كشف اصطياد السيولة (Sweeps/Stop Hunts)", group = G_LIQ)
+bool  showEQ     = input.bool(true, "كشف القمم/القيعان المتساوية (EQH/EQL)", group = G_LIQ)
+float eqThresh   = input.float(0.15, "حساسية التساوي (× ATR)", minval = 0.02, step = 0.01, group = G_LIQ)
+int   poolKeep   = input.int(10, "عمق خزانات السيولة المحفوظة", minval = 3, maxval = 30, group = G_LIQ)
+color swpBearCss = input.color(#ff1744, "سحب سيولة القمم (إشارة بيع)", group = G_LIQ)
+color swpBullCss = input.color(#00e676, "سحب سيولة القيعان (إشارة شراء)", group = G_LIQ)
+color eqCss      = input.color(#e040fb, "لون EQH/EQL", group = G_LIQ)
+
+string G_OFI    = "⚡ تدفق الأوامر | Order Flow (OFI Proxy)"
+int   ofiLen    = input.int(20, "نافذة قياس ضغط التدفق (شموع)", minval = 5, maxval = 100, group = G_OFI)
+bool  useOfi    = input.bool(false, "اشتراط توافق اتجاه التدفق مع الإشارة", group = G_OFI)
+bool  showImp   = input.bool(true, "إظهار شموع الاجتياح ⚡ Displacement", group = G_OFI)
+float impAtr    = input.float(1.8, "قوة الاجتياح (× ATR)", minval = 0.8, step = 0.1, group = G_OFI)
+
+string G_KZ     = "⏰ مناطق القتل | Kill Zones (UTC)"
+bool  showKZ    = input.bool(true, "تلوين خلفية مناطق القتل", group = G_KZ)
+string lonSess  = input.session("0700-1000", "كيل زون لندن 🇬🇧", group = G_KZ)
+string nySess   = input.session("1200-1500", "كيل زون نيويورك 🇺🇸", group = G_KZ)
+string asiaSess = input.session("0000-0300", "كيل زون آسيا 🌏", group = G_KZ)
+color lonKzCss  = input.color(#00b8d426, "لندن", group = G_KZ)
+color nyKzCss   = input.color(#ffd60026, "نيويورك", group = G_KZ)
+color asiaKzCss = input.color(#7c4dff26, "آسيا", group = G_KZ)
+
+string G_HTF   = "📈 الفريم الأعلى والمستويات | HTF Bias & Levels"
+string htf     = input.timeframe("240", "فريم الاتجاه الأعلى (HTF)", group = G_HTF)
+bool  showLV   = input.bool(true, "إظهار PDH/PDL وخط التوازن EQ", group = G_HTF)
+color pdhCss   = input.color(#00e676, "قمة اليوم السابق (سيولة شرائية)", group = G_HTF)
+color pdlCss   = input.color(#ff5252, "قاع اليوم السابق (سيولة بيعية)", group = G_HTF)
+color eqCss2   = input.color(#90a4ae, "خط التوازن 50%", group = G_HTF)
+
+string G_SIG   = "🎯 محرك الإشارات | Confluence Signal Engine"
+bool  showSig  = input.bool(true, "تفعيل إشارات الوحش 🐉", group = G_SIG)
+int   thr      = input.int(70, "الحد الأدنى لنقاط التقاء الإشارة (من 100)", minval = 40, maxval = 100, group = G_SIG)
+int   sigWin   = input.int(6, "نافذة صلاحية محفزات الإشارة (شموع)", minval = 2, maxval = 30, group = G_SIG)
+int   cdBars   = input.int(8, "فترة التهدئة بين الإشارات (شموع)", minval = 0, maxval = 100, group = G_SIG)
+
+string G_DASH  = "📊 لوحة القيادة | Command Dashboard"
+bool  showDash = input.bool(true, "إظهار لوحة القيادة المؤسسية", group = G_DASH)
+bool  colorCnd = input.bool(false, "تلوين الشموع حسب اتجاه الهيكل", group = G_DASH)
+
+// ══════════════════════════════ الحسابات الأساسية ══════════════════════════════
+
+float atr = ta.atr(14)
+
+// ─── جلسات الكيل زون (UTC) — المنطق مفصول عن العرض حتى لا يتأثر المحرك بخيار التلوين ───
+bool inLonRaw  = not na(time(timeframe.period, lonSess,  "UTC"))
+bool inNYRaw   = not na(time(timeframe.period, nySess,   "UTC"))
+bool inAsiaRaw = not na(time(timeframe.period, asiaSess, "UTC"))
+bool inLonKZ   = showKZ and inLonRaw
+bool inNYKZ    = showKZ and inNYRaw
+bool inAsiaKZ  = showKZ and inAsiaRaw
+bool inAnyKZ   = inLonRaw or inNYRaw or inAsiaRaw
+
+// ─── الفريم الأعلى: مزاح بشمعة مؤكدة [1] — لا يعيد الرسم ───
+[hC1, hO1, hH1, hL1, hH2, hL2] = request.security(syminfo.tickerid, htf,
+  [close[1], open[1], high[1], low[1], high[2], low[2]],
+  gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+bool  hBull   = hC1 > hO1 and hH1 > hH2 and hL1 > hL2
+bool  hBear   = hC1 < hO1 and hH1 < hH2 and hL1 < hL2
+int   htfBias = hBull ? 1 : hBear ? -1 : 0
+
+// ─── سيولة اليوم السابق PDH / PDL ───
+[pdh, pdl] = request.security(syminfo.tickerid, "1D", [high[1], low[1]],
+  gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+// ══════════════════════════════ أدوات مساعدة ══════════════════════════════
+
+f_trimBoxes(array<box> a, int maxN) =>
+    while array.size(a) > maxN
+        box b = array.shift(a)
+        box.delete(b)
+
+f_trimLines(array<line> a, int maxN) =>
+    while array.size(a) > maxN
+        line l = array.shift(a)
+        line.delete(l)
+
+f_trimLabels(array<label> a, int maxN) =>
+    while array.size(a) > maxN
+        label x = array.shift(a)
+        label.delete(x)
+
+// هل تحقق الشرط خلال آخر n شمعة؟
+f_recent(bool cond, int n) =>
+    int bs = ta.barssince(cond)
+    not na(bs) and bs <= n
+
+// ══════════════════════════════ 1) محرك هيكل السوق | BOS / CHoCH ══════════════════════════════
+// يكشف البيفوتات المؤكدة، يراقب كسرها بالإغلاق، ويصنف الكسر:
+//   - CHoCH : أول كسر عكس الاتجاه السائد (انعكاس الشخصية)
+//   - BOS   : كسر مع استمرار الاتجاه (Break of Structure)
+// يُعيد: [الاتجاه, BOS▲, BOS▼, CHoCH▲, CHoCH▼, آخر قمة, آخر قاع]
+
+f_struct(int len, bool show, color bullCss, color bearCss, bool isInternal) =>
+    var float hLvl  = na
+    var float lLvl  = na
+    var int   hBar  = na
+    var int   lBar  = na
+    var int   trd   = 0
+    var bool  hUsed = false
+    var bool  lUsed = false
+    var array<line>  ln = array.new_line()
+    var array<label> lb = array.new_label()
+
+    float ph = ta.pivothigh(high, len, len)
+    float pl = ta.pivotlow(low, len, len)
+
+    if not na(ph)
+        hLvl  := ph
+        hBar  := bar_index[len]
+        hUsed := false
+    if not na(pl)
+        lLvl  := pl
+        lBar  := bar_index[len]
+        lUsed := false
+
+    bool bosUp = false
+    bool bosDn = false
+    bool chUp  = false
+    bool chDn  = false
+
+    int    maxKeep = isInternal ? 12 : 20
+    string sz      = isInternal ? size.tiny : size.small
+
+    // كسر القمة بالإغلاق ⇒ زخم شرائي
+    if not na(hLvl) and not hUsed and close > hLvl
+        hUsed := true
+        if trd == -1
+            chUp := true
+        else
+            bosUp := true
+        trd := 1
+        if show and not na(hBar)
+            line  l1 = line.new(hBar, hLvl, bar_index, hLvl, color = bullCss, style = line.style_dashed)
+            int   xm = hBar + int(math.floor((bar_index - hBar) * 0.5))
+            label t1 = label.new(xm, hLvl, chUp ? "CHoCH" : "BOS", xloc = xloc.bar_index,
+              style = label.style_none, color = color(na), textcolor = bullCss, size = sz)
+            array.push(ln, l1)
+            array.push(lb, t1)
+            f_trimLines(ln, maxKeep)
+            f_trimLabels(lb, maxKeep)
+
+    // كسر القاع بالإغلاق ⇒ زخم بيعي
+    if not na(lLvl) and not lUsed and close < lLvl
+        lUsed := true
+        if trd == 1
+            chDn := true
+        else
+            bosDn := true
+        trd := -1
+        if show and not na(lBar)
+            line  l2 = line.new(lBar, lLvl, bar_index, lLvl, color = bearCss, style = line.style_dashed)
+            int   xm2 = lBar + int(math.floor((bar_index - lBar) * 0.5))
+            label t2 = label.new(xm2, lLvl, chDn ? "CHoCH" : "BOS", xloc = xloc.bar_index,
+              style = label.style_none, color = color(na), textcolor = bearCss, size = sz)
+            array.push(ln, l2)
+            array.push(lb, t2)
+            f_trimLines(ln, maxKeep)
+            f_trimLabels(lb, maxKeep)
+
+    [trd, bosUp, bosDn, chUp, chDn, hLvl, lLvl]
+
+[swTrd, swBosUp, swBosDn, swChUp, swChDn, swHigh, swLow] = f_struct(swLen, showSwing, swBullCss, swBearCss, false)
+[iTrd,  iBosUp,  iBosDn,  iChUp,  iChDn,  iH,     iL   ] = f_struct(inLen, showIntrn, inBullCss, inBearCss, true)
+
+// ══════════════════════════════ 2) الفراغات السعرية | FVG + Mitigation ══════════════════════════════
+// خوارزميات HFT تندفع لملء الفراغات — نرسمها ونتتبع تعبئتها لحظة بلحظة.
+
+var array<box> fvgBull = array.new_box()
+var array<box> fvgBear = array.new_box()
+
+bool bullGap = low  > high[2] and (low  - high[2]) >= atr * minFvgAtr
+bool bearGap = high < low[2]  and (low[2] - high ) >= atr * minFvgAtr
+
+if showFVG and bullGap
+    box bf = box.new(bar_index - 1, low, bar_index + 1, high[2], extend = extend.right,
+      border_color = color.new(fvgBull, 40), bgcolor = color.new(fvgBull, 88), border_width = 1)
+    array.push(fvgBull, bf)
+    f_trimBoxes(fvgBull, maxFVG)
+
+if showFVG and bearGap
+    box sf = box.new(bar_index - 1, low[2], bar_index + 1, high, extend = extend.right,
+      border_color = color.new(fvgBear, 40), bgcolor = color.new(fvgBear, 88), border_width = 1)
+    array.push(fvgBear, sf)
+    f_trimBoxes(fvgBear, maxFVG)
+
+// تتبع التعبئة (Mitigation): تقليص الصندوق مع كل اختراق جزئي وحذفه عند الاكتمال
+if array.size(fvgBull) > 0
+    for i = array.size(fvgBull) - 1 to 0
+        box   b = array.get(fvgBull, i)
+        float bT = box.get_top(b)
+        float bB = box.get_bottom(b)
+        if low <= bB
+            array.remove(fvgBull, i)
+            box.delete(b)
+        else if low < bT
+            box.set_top(b, low)
+
+if array.size(fvgBear) > 0
+    for i = array.size(fvgBear) - 1 to 0
+        box   b = array.get(fvgBear, i)
+        float bT = box.get_top(b)
+        float bB = box.get_bottom(b)
+        if high >= bT
+            array.remove(fvgBear, i)
+            box.delete(b)
+        else if high > bB
+            box.set_bottom(b, high)
+
+// ══════════════════════════════ 3) الكتل الطلبية | Order Blocks ══════════════════════════════
+// آخر شمعة معاكسة قبل كسر الهيكل = آثار أقدام المؤسسات.
+
+var array<box> obBull = array.new_box()
+var array<box> obBear = array.new_box()
+
+if showOB and (swBosUp or swChUp)
+    float oT = na
+    float oB = na
+    int   oX = na
+    for j = 1 to obLook
+        if close[j] < open[j]
+            oT := high[j]
+            oB := low[j]
+            oX := bar_index[j]
+            break
+    if not na(oX) and (oT - oB) <= atr * 3.0
+        box ob1 = box.new(oX, oT, bar_index, oB, extend = extend.right,
+          border_color = color.new(obBullCss, 15), bgcolor = color.new(obBullCss, 90), border_width = 1)
+        array.push(obBull, ob1)
+        f_trimBoxes(obBull, maxOB)
+
+if showOB and (swBosDn or swChDn)
+    float dT = na
+    float dB = na
+    int   dX = na
+    for j = 1 to obLook
+        if close[j] > open[j]
+            dT := high[j]
+            dB := low[j]
+            dX := bar_index[j]
+            break
+    if not na(dX) and (dT - dB) <= atr * 3.0
+        box ob2 = box.new(dX, dT, bar_index, dB, extend = extend.right,
+          border_color = color.new(obBearCss, 15), bgcolor = color.new(obBearCss, 90), border_width = 1)
+        array.push(obBear, ob2)
+        f_trimBoxes(obBear, maxOB)
+
+// إبطال الكتلة عند الإغلاق خلف حدّها الأقصى
+if array.size(obBull) > 0
+    for i = array.size(obBull) - 1 to 0
+        box b = array.get(obBull, i)
+        if close < box.get_bottom(b)
+            array.remove(obBull, i)
+            box.delete(b)
+
+if array.size(obBear) > 0
+    for i = array.size(obBear) - 1 to 0
+        box b = array.get(obBear, i)
+        if close > box.get_top(b)
+            array.remove(obBear, i)
+            box.delete(b)
+
+// ══════════════════════════════ 4) محرك السيولة | Pools + Sweeps + EQH/EQL ══════════════════════════════
+
+var array<float> poolH  = array.new_float()
+var array<int>   poolHB = array.new_int()
+var array<float> poolL  = array.new_float()
+var array<int>   poolLB = array.new_int()
+var array<line>  miscL  = array.new_line()
+var array<label> miscB  = array.new_label()
+
+float iph = ta.pivothigh(high, inLen, inLen)
+float ipl = ta.pivotlow(low, inLen, inLen)
+
+if not na(iph)
+    array.push(poolH, iph)
+    array.push(poolHB, bar_index[inLen])
+    if array.size(poolH) > poolKeep
+        array.shift(poolH)
+        array.shift(poolHB)
+    // قمم متساوية = أوامر وقف مكدسة فوقها
+    if showEQ and array.size(poolH) > 1
+        float hPv  = array.get(poolH,  array.size(poolH)  - 2)
+        int   hPvB = array.get(poolHB, array.size(poolHB) - 2)
+        if math.abs(iph - hPv) <= atr * eqThresh
+            line  eL = line.new(hPvB, hPv, bar_index, iph, color = eqCss, style = line.style_dotted, width = 1)
+            label eB = label.new(bar_index, iph, "EQH 💰", xloc = xloc.bar_index,
+              style = label.style_none, color = color(na), textcolor = eqCss, size = size.tiny)
+            array.push(miscL, eL)
+            array.push(miscB, eB)
+            f_trimLines(miscL, 30)
+            f_trimLabels(miscB, 60)
+
+if not na(ipl)
+    array.push(poolL, ipl)
+    array.push(poolLB, bar_index[inLen])
+    if array.size(poolL) > poolKeep
+        array.shift(poolL)
+        array.shift(poolLB)
+    if showEQ and array.size(poolL) > 1
+        float lPv  = array.get(poolL,  array.size(poolL)  - 2)
+        int   lPvB = array.get(poolLB, array.size(poolLB) - 2)
+        if math.abs(ipl - lPv) <= atr * eqThresh
+            line  eL2 = line.new(lPvB, lPv, bar_index, ipl, color = eqCss, style = line.style_dotted, width = 1)
+            label eB2 = label.new(bar_index, ipl, "EQL 💰", xloc = xloc.bar_index,
+              style = label.style_none, color = color(na), textcolor = eqCss, size = size.tiny)
+            array.push(miscL, eL2)
+            array.push(miscB, eB2)
+            f_trimLines(miscL, 30)
+            f_trimLabels(miscB, 60)
+
+// اصطياد السيولة: ذيل يخترق المستوى ثم إغلاق يعود خلفه = Stop Hunt مؤسسي
+bool bullSweep = false
+bool bearSweep = false
+
+if showSweep and array.size(poolH) > 0
+    for i = array.size(poolH) - 1 to 0
+        float lv = array.get(poolH, i)
+        if high > lv and close < lv
+            bearSweep := true
+            array.remove(poolH, i)
+            array.remove(poolHB, i)
+            label sH = label.new(bar_index, high, "💧 SELL", xloc = xloc.bar_index,
+              style = label.style_label_down, color = color.new(swpBearCss, 20),
+              textcolor = color.white, size = size.tiny)
+            array.push(miscB, sH)
+            f_trimLabels(miscB, 60)
+
+if showSweep and array.size(poolL) > 0
+    for i = array.size(poolL) - 1 to 0
+        float lv = array.get(poolL, i)
+        if low < lv and close > lv
+            bullSweep := true
+            array.remove(poolL, i)
+            array.remove(poolLB, i)
+            label sL = label.new(bar_index, low, "💧 BUY", xloc = xloc.bar_index,
+              style = label.style_label_up, color = color.new(swpBullCss, 20),
+              textcolor = color.black, size = size.tiny)
+            array.push(miscB, sL)
+            f_trimLabels(miscB, 60)
+
+// ══════════════════════════════ 5) تدفق الأوامر | OFI Proxy (Implied Delta) ══════════════════════════════
+// لا يمكن لـ Pine الوصول لدفتر الأوامر الحقيقي — نستخدم مكان الإغلاق داخل نطاق الشمعة (CLV)
+// مضروباً بالحجم لتقدير دلتا الشراء/البيع: منهجية Buy/Sell Pressure المؤسسية.
+
+bool  hasVol = not na(volume)
+float rngBar = high - low
+float clv    = rngBar > 0 ? ((close - low) - (high - close)) / rngBar : 0.0
+float volU   = hasVol ? volume : 1.0
+float dlt    = clv * volU
+float sumD   = math.sum(dlt,  ofiLen)
+float sumV   = math.sum(volU, ofiLen)
+float ofiPct = sumV > 0 ? 100.0 * sumD / sumV : 0.0
+
+// شموع الاجتياح (Displacement) — اشتعال الزخم اللحظي
+bool dispBull = close > open and (high - low) > atr * impAtr and (close - open) > atr * impAtr * 0.55
+bool dispBear = close < open and (high - low) > atr * impAtr and (open - close) > atr * impAtr * 0.55
+
+if showImp and dispBull
+    label i1 = label.new(bar_index, low, "⚡", xloc = xloc.bar_index, style = label.style_label_up,
+      color = color(na), textcolor = color.new(#00e5ff, 0), size = size.tiny)
+    array.push(miscB, i1)
+    f_trimLabels(miscB, 60)
+
+if showImp and dispBear
+    label i2 = label.new(bar_index, high, "⚡", xloc = xloc.bar_index, style = label.style_label_down,
+      color = color(na), textcolor = color.new(#ffab00, 0), size = size.tiny)
+    array.push(miscB, i2)
+    f_trimLabels(miscB, 60)
+
+// ══════════════════════════════ 6) مناطق العلاوة والخصم | Premium / Discount ══════════════════════════════
+
+bool  hvSw   = not na(swHigh) and not na(swLow)
+float eqLvl  = hvSw ? (swHigh + swLow) * 0.5 : na
+float rngSw  = hvSw ? swHigh - swLow : na
+float posPct = hvSw and not na(rngSw) and rngSw > 0 ? (close - swLow) / rngSw * 100.0 : na
+bool  inDisc = not na(posPct) and posPct < 50.0
+bool  inPrem = not na(posPct) and posPct > 50.0
+
+// ══════════════════════════════ 7) القرب من مناطق الطلب/العرض ══════════════════════════════
+
+bool nearDemand = false
+bool nearSupply = false
+
+if array.size(obBull) > 0
+    for i = 0 to array.size(obBull) - 1
+        box   b  = array.get(obBull, i)
+        float zT = box.get_top(b)
+        float zB = box.get_bottom(b)
+        if close <= zT + atr * 0.5 and close >= zB - atr * 0.3
+            nearDemand := true
+            break
+
+if array.size(obBear) > 0
+    for i = 0 to array.size(obBear) - 1
+        box   b  = array.get(obBear, i)
+        float zT = box.get_top(b)
+        float zB = box.get_bottom(b)
+        if close >= zB - atr * 0.5 and close <= zT + atr * 0.3
+            nearSupply := true
+            break
+
+if not nearDemand and array.size(fvgBull) > 0
+    for i = 0 to array.size(fvgBull) - 1
+        float zT = box.get_top(array.get(fvgBull, i))
+        if close <= zT and close >= zT - atr * 0.8
+            nearDemand := true
+            break
+
+if not nearSupply and array.size(fvgBear) > 0
+    for i = 0 to array.size(fvgBear) - 1
+        float zB = box.get_bottom(array.get(fvgBear, i))
+        if close >= zB and close <= zB + atr * 0.8
+            nearSupply := true
+            break
+
+// ══════════════════════════════ 8) محرك الإشارات | Confluence Scoring (من 100) ══════════════════════════════
+//  سحب سيولة 25 + كسر هيكل 20 + منطقة خصم/علاوة 15 + لمس OB/FVG 20 + كيل زون 10 + اتجاه HTF 10
+
+int scLong = (f_recent(bullSweep, sigWin) ? 25 : 0) +
+  ((f_recent(swBosUp, sigWin) or f_recent(swChUp, sigWin)) ? 20 : 0) +
+  (inDisc ? 15 : 0) + (nearDemand ? 20 : 0) +
+  (inAnyKZ ? 10 : 0) + (htfBias == 1 ? 10 : 0)
+
+int scShort = (f_recent(bearSweep, sigWin) ? 25 : 0) +
+  ((f_recent(swBosDn, sigWin) or f_recent(swChDn, sigWin)) ? 20 : 0) +
+  (inPrem ? 15 : 0) + (nearSupply ? 20 : 0) +
+  (inAnyKZ ? 10 : 0) + (htfBias == -1 ? 10 : 0)
+
+// محفز التوقيت: سحب سيولة حديث (≤ 3 شموع) أو كسر هيكل على هذه الشمعة
+int  bsSweepB = ta.barssince(bullSweep)
+int  bsSweepS = ta.barssince(bearSweep)
+bool trigL    = (not na(bsSweepB) and bsSweepB <= 3) or swChUp or swBosUp
+bool trigS    = (not na(bsSweepS) and bsSweepS <= 3) or swChDn or swBosDn
+
+bool ofiOkL = not useOfi or ofiPct > 0.0
+bool ofiOkS = not useOfi or ofiPct < 0.0
+
+var int lastSigBar = na
+bool cdOk = na(lastSigBar) or (bar_index - lastSigBar > cdBars)
+
+bool longSignal  = showSig and cdOk and trigL and scLong  >= thr and ofiOkL and not inPrem
+bool shortSignal = showSig and cdOk and trigS and scShort >= thr and ofiOkS and not inDisc
+
+if longSignal or shortSignal
+    lastSigBar := bar_index
+
+// ══════════════════════════════ المخرجات الرسومية (Global Scope) ══════════════════════════════
+
+// خطوط سيولة اليوم السابق + خط التوازن 50%
+plot(showLV ? pdh   : na, "PDH — سيولة القمة", color = color.new(pdhCss, 0), style = plot.style_linebr, linewidth = 1)
+plot(showLV ? pdl   : na, "PDL — سيولة القاع", color = color.new(pdlCss, 0), style = plot.style_linebr, linewidth = 1)
+plot(showLV ? eqLvl : na, "Equilibrium 50%",   color = color.new(eqCss2, 20), style = plot.style_linebr, linewidth = 1)
+
+// إشارات الوحش 🐉
+plotshape(longSignal,  title = "🟢 BEAST LONG",  style = shape.triangleup,   location = location.belowbar,
+  color = color.new(#00e676, 0), size = size.small, text = "BUY 🐉",  textcolor = color.new(#00e676, 0))
+plotshape(shortSignal, title = "🔴 BEAST SHORT", style = shape.triangledown, location = location.abovebar,
+  color = color.new(#ff1744, 0), size = size.small, text = "SELL 🐉", textcolor = color.new(#ff1744, 0))
+
+// خلفيات الكيل زون
+bgcolor(inLonKZ  ? lonKzCss  : na, title = "London Killzone")
+bgcolor(inNYKZ   ? nyKzCss   : na, title = "New York Killzone")
+bgcolor(inAsiaKZ ? asiaKzCss : na, title = "Asia Killzone")
+
+// تلوين الشموع حسب اتجاه الهيكل (اختياري)
+barcolor(colorCnd ? (swTrd == 1 ? color.new(swBullCss, 65) : swTrd == -1 ? color.new(swBearCss, 65) : na) : na)
+
+// ══════════════════════════════ لوحة القيادة المؤسسية ══════════════════════════════
+
+var table dash = table.new(position.top_right, 2, 10,
+  bgcolor = color.new(#0d1117, 15), border_width = 1, border_color = color.new(#37474f, 40))
+
+if barstate.islast and showDash
+    color cBull = #00e676
+    color cBear = #ff5252
+    color cNeut = #b0bec5
+    color cAcc  = #40c4ff
+
+    string biasTxt = htfBias == 1 ? "🟢 BULL ▲" : htfBias == -1 ? "🔴 BEAR ▼" : "⚪ NEUTRAL ◆"
+    color  biasCss = htfBias == 1 ? cBull : htfBias == -1 ? cBear : cNeut
+
+    string sA = swTrd == 1 ? "▲" : swTrd == -1 ? "▼" : "◆"
+    string sB = iTrd  == 1 ? "▲" : iTrd  == -1 ? "▼" : "◆"
+    color  stCss = swTrd == 1 ? cBull : swTrd == -1 ? cBear : cNeut
+
+    string ofiTxt = (ofiPct > 0 ? "+" : "") + str.tostring(ofiPct, "#.#") + "%"
+    color  ofiCss = ofiPct >  5.0 ? cBull : ofiPct < -5.0 ? cBear : cNeut
+
+    string zoneTxt = na(posPct) ? "—" : posPct > 70.0 ? "🔻 PREMIUM " + str.tostring(math.min(posPct, 999.0), "#") + "%" :
+      posPct < 30.0 ? "🔹 DISCOUNT " + str.tostring(math.max(posPct, -999.0), "#") + "%" : "⚖️ EQ " + str.tostring(posPct, "#") + "%"
+
+    string kzTxt = inLonKZ ? "🏦 لندن نشطة" : inNYKZ ? "🗽 نيويورك نشطة" : inAsiaKZ ? "🌏 آسيا نشطة" : "💤 خارج الزون"
+
+    string lvTxt = na(pdh) or na(pdl) or na(atr) ? "—" : "PDH " + str.tostring((pdh - close) / atr * 100.0, "#") + "%A · PDL " +
+      str.tostring((close - pdl) / atr * 100.0, "#") + "%A"
+
+    string zoneCnt = "FVG " + str.tostring(array.size(fvgBull)) + "▲ " + str.tostring(array.size(fvgBear)) + "▼ · OB " +
+      str.tostring(array.size(obBull)) + "▲ " + str.tostring(array.size(obBear)) + "▼"
+
+    string scTxt = str.tostring(scLong) + " ▲ | ▼ " + str.tostring(scShort)
+    color  scCss = scLong >= thr ? cBull : scShort >= thr ? cBear : cNeut
+
+    string sigTxt = longSignal ? "⚡ LONG 🐉🔥" : shortSignal ? "⚡ SHORT 🐉🔥" : "🔍 يتربص بالسيولة…"
+    color  sigCss = longSignal ? cBull : shortSignal ? cBear : cAcc
+
+    color hBg = color.new(#131a24, 10)
+    table.cell(dash, 0, 0, "🐉 SMC BEAST PRO", text_color = color.white, bgcolor = hBg, text_size = size.small)
+    table.cell(dash, 1, 0, "HFT SUITE v6",      text_color = cAcc,        bgcolor = hBg, text_size = size.small)
+
+    table.cell(dash, 0, 1, "📈 HTF (" + htf + ")", text_color = cNeut,   text_size = size.small)
+    table.cell(dash, 1, 1, biasTxt,                text_color = biasCss, text_size = size.small)
+
+    table.cell(dash, 0, 2, "🏛️ الهيكل",                    text_color = cNeut, text_size = size.small)
+    table.cell(dash, 1, 2, "Swing " + sA + " · Int " + sB, text_color = stCss, text_size = size.small)
+
+    table.cell(dash, 0, 3, "⚡ التدفق OFI", text_color = cNeut,  text_size = size.small)
+    table.cell(dash, 1, 3, ofiTxt,          text_color = ofiCss, text_size = size.small)
+
+    table.cell(dash, 0, 4, "⚖️ المنطقة", text_color = cNeut, text_size = size.small)
+    table.cell(dash, 1, 4, zoneTxt,        text_color = cAcc,  text_size = size.small)
+
+    table.cell(dash, 0, 5, "⏰ الكيل زون", text_color = cNeut,                            text_size = size.small)
+    table.cell(dash, 1, 5, kzTxt,          text_color = inAnyKZ ? color.orange : cNeut,   text_size = size.small)
+
+    table.cell(dash, 0, 6, "💧 سيولة اليوم", text_color = cNeut, text_size = size.small)
+    table.cell(dash, 1, 6, lvTxt,            text_color = cAcc,  text_size = size.small)
+
+    table.cell(dash, 0, 7, "📦 الزونات الحية", text_color = cNeut, text_size = size.small)
+    table.cell(dash, 1, 7, zoneCnt,            text_color = cAcc,  text_size = size.small)
+
+    table.cell(dash, 0, 8, "🎯 النقاط ▲/▼", text_color = cNeut, text_size = size.small)
+    table.cell(dash, 1, 8, scTxt,            text_color = scCss, text_size = size.small)
+
+    table.cell(dash, 0, 9, "🐉 الحالة", text_color = cNeut, bgcolor = hBg, text_size = size.small)
+    table.cell(dash, 1, 9, sigTxt,      text_color = sigCss, bgcolor = hBg, text_size = size.small)
+
+// ══════════════════════════════ التنبيهات | ALERTS ══════════════════════════════
+
+alertcondition(longSignal, "🟢 BEAST LONG — شراء مؤسسي",
+  "🐉 SMC BEAST: إشارة شراء مؤسسية على {{ticker}} عند {{close}} (فريم {{interval}}) — تحقق من النقاط والمنطقة قبل الدخول.")
+alertcondition(shortSignal, "🔴 BEAST SHORT — بيع مؤسسي",
+  "🐉 SMC BEAST: إشارة بيع مؤسسية على {{ticker}} عند {{close}} (فريم {{interval}}) — تحقق من النقاط والمنطقة قبل الدخول.")
+alertcondition(bullSweep, "💧 سحب سيولة القيعان (bullish sweep)",
+  "💧 SMC BEAST: تم اصطياد سيولة القيعان على {{ticker}} @ {{close}} — راقب انعكاس CHoCH.")
+alertcondition(bearSweep, "💧 سحب سيولة القمم (bearish sweep)",
+  "💧 SMC BEAST: تم اصطياد سيولة القمم على {{ticker}} @ {{close}} — راقب انعكاس CHoCH.")
+alertcondition(swChUp or iChUp, "🔁 CHoCH صاعد",
+  "🔁 SMC BEAST: تغير شخصية السوق صعوداً (CHoCH) على {{ticker}} @ {{close}}.")
+alertcondition(swChDn or iChDn, "🔁 CHoCH هابط",
+  "🔁 SMC BEAST: تغير شخصية السوق هبوطاً (CHoCH) على {{ticker}} @ {{close}}.")
+
+// ══════════════════════════════ نهاية الكود — بالتوفيق 🐉 ══════════════════════════════
