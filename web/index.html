@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>⚡ ULTRA-HFT QUANT CORE V6 — MT5 LIVE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ══════════ TOP BAR ══════════ -->
+  <div id="topbar">
+    <div class="brand">⚡ ULTRA-HFT QUANT CORE V6<small>MetaTrader 5 · Live Execution Engine</small></div>
+
+    <span class="pill neutral" id="connPill"><i class="dot"></i><span id="connText">جارٍ الاتصال…</span></span>
+    <span class="pill neutral" id="autoPill"><i class="dot"></i><span id="autoText">الآلي: موقوف</span></span>
+
+    <div class="top-metric"><span>الرصيد</span><b id="mBalance">—</b></div>
+    <div class="top-metric"><span>حقوق الملكية</span><b id="mEquity">—</b></div>
+    <div class="top-metric"><span>الربح العائم</span><b id="mProfit">—</b></div>
+    <div class="top-metric"><span>الهامش الحر</span><b id="mFree">—</b></div>
+    <div class="top-metric"><span>صفقات مفتوحة</span><b id="mPos">0</b></div>
+
+    <div class="spacer"></div>
+
+    <select id="symbolSel" style="width:130px"></select>
+    <select id="tfSel" style="width:80px"></select>
+    <button class="btn-ghost btn-sm" id="btnAccount">⚙ الحساب</button>
+  </div>
+
+  <!-- ══════════ LEFT — CONTROL PANEL ══════════ -->
+  <div id="left">
+
+    <div class="panel card">
+      <h3>🚀 التداول الآلي <span class="hint" id="cycleMs"></span></h3>
+      <div class="row">
+        <label><b>تفعيل الفتح التلقائي</b></label>
+        <label class="switch"><input type="checkbox" id="autoTrade"><span class="slider"></span></label>
+      </div>
+      <div class="row"><label>نسبة المخاطرة لكل صفقة %</label><span class="val" id="vRisk">1.0</span></div>
+      <input type="range" id="riskPercent" min="0.1" max="10" step="0.1" value="1">
+      <div class="row" style="margin-top:8px"><label>أقصى عدد صفقات</label>
+        <input type="number" id="maxPositions" min="1" max="20" step="1" style="width:70px"></div>
+      <div class="row"><label>لوت ثابت (عند إيقاف المخاطرة)</label>
+        <input type="number" id="fixedLot" min="0.01" step="0.01" style="width:70px"></div>
+      <div class="row"><label>حساب اللوت بالمخاطرة</label>
+        <label class="switch"><input type="checkbox" id="useRiskSizing"><span class="slider"></span></label></div>
+      <div class="row"><label>إغلاق 50% عند TP1</label>
+        <label class="switch"><input type="checkbox" id="partialTp1"><span class="slider"></span></label></div>
+      <div class="row"><label>نقل الوقف للتعادل</label>
+        <label class="switch"><input type="checkbox" id="moveToBe"><span class="slider"></span></label></div>
+      <div class="row"><label>وقف متحرك (Trailing)</label>
+        <label class="switch"><input type="checkbox" id="trailingStop"><span class="slider"></span></label></div>
+      <div class="row"><label>مسافة التريلينج × ATR</label>
+        <input type="number" id="trailAtr" min="0.2" step="0.1" style="width:70px"></div>
+      <div class="row"><label>حد الخسارة اليومي %</label>
+        <input type="number" id="dailyLoss" min="0" step="0.5" style="width:70px"></div>
+      <div class="row"><label>هدف الربح اليومي %</label>
+        <input type="number" id="dailyProfit" min="0" step="0.5" style="width:70px"></div>
+      <div class="row"><label>أقصى سبريد (نقاط)</label>
+        <input type="number" id="maxSpread" min="0" step="1" style="width:70px"></div>
+    </div>
+
+    <div class="panel card">
+      <h3>🎯 محرك الإشارات</h3>
+      <div class="row"><label>وضع الإشارة</label>
+        <select id="signalMode" style="width:120px">
+          <option value="strict">صارم (كل الشروط)</option>
+          <option value="balanced">متوازن (نقاط)</option>
+          <option value="aggressive">هجومي</option>
+        </select></div>
+      <div class="row"><label>حد النقاط للدخول</label><span class="val" id="vMinScore">65</span></div>
+      <input type="range" id="minScore" min="30" max="95" step="1" value="65">
+    </div>
+
+    <div class="panel card">
+      <h3>🧠 SMART MONEY (SMC)</h3>
+      <div class="row"><label>طول السوينغ</label><span class="val" id="vSwing">5</span></div>
+      <input type="range" id="swingLen" min="2" max="20" step="1">
+      <div class="row" style="margin-top:8px"><label>إظهار BOS</label>
+        <label class="switch"><input type="checkbox" id="showBos"><span class="slider"></span></label></div>
+      <div class="row"><label>إظهار CHoCH</label>
+        <label class="switch"><input type="checkbox" id="showChoch"><span class="slider"></span></label></div>
+      <div class="row"><label>إظهار فجوات FVG</label>
+        <label class="switch"><input type="checkbox" id="showFvg"><span class="slider"></span></label></div>
+      <div class="row"><label>حد أدنى للفجوة × ATR</label>
+        <input type="number" id="fvgFilter" min="0" step="0.1" style="width:70px"></div>
+    </div>
+
+    <div class="panel card">
+      <h3>⚡ ORDER FLOW (OFI)</h3>
+      <div class="row"><label>تفعيل رادار التدفق</label>
+        <label class="switch"><input type="checkbox" id="useOfi"><span class="slider"></span></label></div>
+      <div class="row"><label>نافذة OFI</label><span class="val" id="vOfi">14</span></div>
+      <input type="range" id="ofiLen" min="5" max="50" step="1">
+      <div class="row" style="margin-top:8px"><label>مضاعف انفجار الحجم</label><span class="val" id="vVol">1.5</span></div>
+      <input type="range" id="volMult" min="1" max="5" step="0.1">
+      <div class="row" style="margin-top:8px"><label>طول الدلتا التراكمية</label>
+        <input type="number" id="deltaLen" min="5" max="100" step="1" style="width:70px"></div>
+    </div>
+
+    <div class="panel card">
+      <h3>📐 Z-SCORE (إحصائي)</h3>
+      <div class="row"><label>تفعيل فلتر Z</label>
+        <label class="switch"><input type="checkbox" id="useZ"><span class="slider"></span></label></div>
+      <div class="row"><label>نافذة Z</label><span class="val" id="vZlen">50</span></div>
+      <input type="range" id="zLen" min="10" max="200" step="1">
+      <div class="row" style="margin-top:8px"><label>عتبة الدخول</label><span class="val" id="vZth">2.0</span></div>
+      <input type="range" id="zThresh" min="0.5" max="4" step="0.1">
+      <div class="row" style="margin-top:8px"><label>حد الانعكاس المتطرف</label><span class="val" id="vZex">3.0</span></div>
+      <input type="range" id="zExtreme" min="1.5" max="6" step="0.1">
+    </div>
+
+    <div class="panel card">
+      <h3>💰 المخاطر (SL / TP)</h3>
+      <div class="row"><label>طول ATR</label><span class="val" id="vAtr">14</span></div>
+      <input type="range" id="atrLen" min="5" max="50" step="1">
+      <div class="row" style="margin-top:8px"><label>وقف الخسارة × ATR</label><span class="val" id="vSl">1.5</span></div>
+      <input type="range" id="slAtr" min="0.3" max="6" step="0.1">
+      <div class="row" style="margin-top:8px"><label>الهدف الأول × ATR</label><span class="val" id="vTp1">2.0</span></div>
+      <input type="range" id="tp1Atr" min="0.5" max="10" step="0.1">
+      <div class="row" style="margin-top:8px"><label>الهدف الثاني × ATR</label><span class="val" id="vTp2">4.0</span></div>
+      <input type="range" id="tp2Atr" min="1" max="20" step="0.1">
+      <div class="row" style="margin-top:8px"><label>تفعيل التعادل بعد (R)</label>
+        <input type="number" id="beTrigger" min="0.2" step="0.1" style="width:70px"></div>
+    </div>
+
+    <div class="panel card">
+      <h3>🌍 فلتر الجلسات (UTC)</h3>
+      <div class="row"><label>تقييد لندن/نيويورك فقط</label>
+        <label class="switch"><input type="checkbox" id="sessOn"><span class="slider"></span></label></div>
+      <div class="row"><label>لندن</label><input type="text" id="londonSess" style="width:110px"></div>
+      <div class="row"><label>نيويورك</label><input type="text" id="nySess" style="width:110px"></div>
+    </div>
+
+  </div>
+
+  <!-- ══════════ CENTER — 3D CHART ══════════ -->
+  <div id="center">
+    <div id="chartWrap">
+      <canvas id="three"></canvas>
+      <div id="priceTag">
+        <div class="sym" id="tagSym">—</div>
+        <div class="px" id="tagPx">—</div>
+        <div class="sub"><span id="tagBidAsk">—</span> · سبريد <span id="tagSpread">—</span></div>
+      </div>
+      <div id="chartHud">
+        <button class="btn-ghost btn-sm" id="btnRotate">🔄 دوران تلقائي</button>
+        <button class="btn-ghost btn-sm" id="btnReset">🎯 إعادة الزاوية</button>
+        <button class="btn-ghost btn-sm" id="btn3d">📐 3D / 2D</button>
+        <button class="btn-ghost btn-sm" id="btnFvg">🟦 FVG</button>
+        <button class="btn-ghost btn-sm" id="btnVol">📊 الحجم</button>
+      </div>
+      <div id="legend">
+        <span><i style="background:#00ffd5"></i>شراء</span>
+        <span><i style="background:#ff2e63"></i>بيع</span>
+        <span><i style="background:#ffd700"></i>CHoCH</span>
+        <span><i style="background:#a855f7"></i>BOS</span>
+        <span><i style="background:#38bdf8"></i>SL/TP</span>
+        <span class="mono" id="fpsTag"></span>
+      </div>
+    </div>
+
+    <!-- SIGNAL CARD -->
+    <div id="signalCard">
+      <div class="sig-head">
+        <span class="sig-badge flat" id="sigBadge">FLAT</span>
+        <div class="score-bar"><i id="sigScoreBar"></i></div>
+        <span class="mono" id="sigScoreTxt" style="font-size:12px">0</span>
+        <button class="btn-buy btn-sm" id="btnTakeSignal" disabled>⚡ تنفيذ الإشارة الآن</button>
+      </div>
+      <div class="sig-grid">
+        <div><span>الدخول</span><b id="sigEntry">—</b></div>
+        <div><span>وقف الخسارة</span><b id="sigSl" class="neg">—</b></div>
+        <div><span>الهدف 1</span><b id="sigTp1" class="pos">—</b></div>
+        <div><span>الهدف 2</span><b id="sigTp2" class="pos">—</b></div>
+      </div>
+      <div class="reasons" id="sigReasons"></div>
+    </div>
+  </div>
+
+  <!-- ══════════ RIGHT — LIVE DATA ══════════ -->
+  <div id="right">
+
+    <div class="panel card">
+      <h3>✋ التنفيذ اليدوي</h3>
+      <div class="row"><label>الحجم (لوت)</label>
+        <input type="number" id="mLot" min="0.01" step="0.01" value="0.01" style="width:80px"></div>
+      <div class="row"><label>SL يدوي (سعر)</label>
+        <input type="number" id="mSl" step="0.00001" placeholder="فارغ = ATR" style="width:110px"></div>
+      <div class="row"><label>TP يدوي (سعر)</label>
+        <input type="number" id="mTp" step="0.00001" placeholder="فارغ = ATR" style="width:110px"></div>
+      <div class="row"><label>أو SL × ATR</label>
+        <input type="number" id="mSlAtr" step="0.1" placeholder="1.5" style="width:80px"></div>
+      <div class="row"><label>أو TP × ATR</label>
+        <input type="number" id="mTpAtr" step="0.1" placeholder="3.0" style="width:80px"></div>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn-buy" id="btnBuy">▲ شراء</button>
+        <button class="btn-sell" id="btnSell">▼ بيع</button>
+      </div>
+      <button class="btn-ghost" id="btnCloseAll" style="width:100%;margin-top:7px">✖ إغلاق كل الصفقات</button>
+      <p class="mini" style="margin-top:6px">اترك SL/TP فارغين ليتم حسابهما تلقائياً من ATR الحالي.</p>
+    </div>
+
+    <div class="panel card">
+      <h3>📈 الصفقات المفتوحة <span class="hint" id="posCount">0</span></h3>
+      <div style="max-height:230px;overflow:auto">
+        <table id="posTable">
+          <thead><tr><th>#</th><th>الرمز</th><th>نوع</th><th>لوت</th><th>دخول</th><th>SL</th><th>TP</th><th>ربح</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel card">
+      <h3>📊 لوحة الحالة الحية</h3>
+      <div class="stats-grid">
+        <div class="stat"><span>الاتجاه</span><b id="stTrend">—</b></div>
+        <div class="stat"><span>Z-SCORE</span><b id="stZ">—</b></div>
+        <div class="stat"><span>OFI</span><b id="stOfi">—</b></div>
+        <div class="stat"><span>الحجم النسبي</span><b id="stVol">—</b></div>
+        <div class="stat"><span>RSI</span><b id="stRsi">—</b></div>
+        <div class="stat"><span>ADX</span><b id="stAdx">—</b></div>
+        <div class="stat"><span>ATR</span><b id="stAtr">—</b></div>
+        <div class="stat"><span>الجلسة</span><b id="stSess">—</b></div>
+      </div>
+    </div>
+
+    <div class="panel card">
+      <h3>🧪 الإحصائيات</h3>
+      <div class="tabs">
+        <button class="active" data-tab="bt">محاكاة الاستراتيجية</button>
+        <button data-tab="acc">حساب حقيقي (7 أيام)</button>
+      </div>
+      <div class="tab-page active" id="tab-bt">
+        <div class="stats-grid">
+          <div class="stat"><span>عدد الصفقات</span><b id="btTrades">0</b></div>
+          <div class="stat"><span>نسبة الربح</span><b id="btWr">0%</b></div>
+          <div class="stat"><span>عامل الربح</span><b id="btPf">0</b></div>
+          <div class="stat"><span>التوقع (R)</span><b id="btExp">0</b></div>
+          <div class="stat"><span>صافي R</span><b id="btNet">0</b></div>
+          <div class="stat"><span>أقصى تراجع R</span><b id="btDd">0</b></div>
+          <div class="stat"><span>رابح / خاسر</span><b id="btWl">0/0</b></div>
+          <div class="stat"><span>متوسط الشموع</span><b id="btBars">0</b></div>
+        </div>
+      </div>
+      <div class="tab-page" id="tab-acc">
+        <div class="stats-grid">
+          <div class="stat"><span>صفقات</span><b id="acTrades">0</b></div>
+          <div class="stat"><span>نسبة الربح</span><b id="acWr">0%</b></div>
+          <div class="stat"><span>صافي الربح</span><b id="acNet">0</b></div>
+          <div class="stat"><span>عامل الربح</span><b id="acPf">0</b></div>
+          <div class="stat"><span>أفضل صفقة</span><b id="acBest">0</b></div>
+          <div class="stat"><span>أسوأ صفقة</span><b id="acWorst">0</b></div>
+        </div>
+        <p class="mini" id="acHalt" style="margin-top:6px"></p>
+      </div>
+    </div>
+
+    <div class="panel card">
+      <h3>🔔 آخر الإشارات</h3>
+      <div style="max-height:170px;overflow:auto">
+        <table id="sigTable">
+          <thead><tr><th>الوقت</th><th>الاتجاه</th><th>نقاط</th><th>دخول</th><th>نُفذت</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel card">
+      <h3>📜 سجل النظام</h3>
+      <div id="logs"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════ MODALS ══════════ -->
+<div class="modal-bg" id="modalAccount">
+  <div class="modal">
+    <h3>⚙ إعدادات الاتصال بـ MetaTrader 5</h3>
+    <div class="row"><label>رقم الحساب</label><input type="number" id="accLogin" style="width:150px"></div>
+    <div class="row"><label>كلمة المرور</label><input type="text" id="accPass" style="width:150px"></div>
+    <div class="row"><label>السيرفر</label><input type="text" id="accServer" style="width:150px"></div>
+    <div class="row"><label>مسار terminal64.exe</label><input type="text" id="accPath" placeholder="اختياري" style="width:150px"></div>
+    <p class="mini">الاتصال الحقيقي يتطلب تشغيل السكربت على ويندوز مع تثبيت منصة MetaTrader 5 ومكتبة MetaTrader5. عند غياب المكتبة يعمل النظام في وضع المحاكي مع نفس المنطق بالكامل.</p>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn-gold" id="btnDoConnect">🔌 اتصال</button>
+      <button class="btn-ghost" id="btnCloseModal">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modalEdit">
+  <div class="modal">
+    <h3>✏ تعديل الصفقة <span id="editTicket" class="mono"></span></h3>
+    <div class="row"><label>وقف الخسارة</label><input type="number" id="editSl" step="0.00001" style="width:150px"></div>
+    <div class="row"><label>جني الأرباح</label><input type="number" id="editTp" step="0.00001" style="width:150px"></div>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn-gold" id="btnDoModify">💾 حفظ</button>
+      <button class="btn-ghost" id="btnCloseEdit">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+        onerror="window.__noThree=true"></script>
+<script src="/static/chart3d.js"></script>
+<script src="/static/chart2d.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
