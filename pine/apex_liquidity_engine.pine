@@ -1,0 +1,295 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// © APEX LIQUIDITY ENGINE — Smart Money / Institutional Order Flow Engine
+//@version=5
+indicator("APEX LIQUIDITY ENGINE [SMC PRO]", "APEX ⚡", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
+
+// ═══════════════════════════════════════════════════════════════════
+//  المفاهيم المستخدمة (ليست مؤشرات مشهورة):
+//  1) Market Structure : BOS / CHoCH  (كسر الهيكل + تغير الشخصية)
+//  2) Liquidity Sweep  : Stop Hunt فوق/تحت السيولة (Equal Highs/Lows)
+//  3) Order Blocks     : آخر شمعة معاكسة قبل الحركة الاندفاعية
+//  4) Fair Value Gap   : عدم توازن السعر (Imbalance / FVG)
+//  5) Premium/Discount : مناطق التسعير حسب دورة السيولة
+//  6) Delta Volume     : ضغط المشترين مقابل البائعين داخل الشمعة
+//  7) Kill Zones       : جلسات لندن / نيويورك (توقيت المؤسسات)
+// ═══════════════════════════════════════════════════════════════════
+
+// ───────────── INPUTS ─────────────
+grpS = "⚙️ الهيكل السعري"
+swLen    = input.int(8,   "حساسية القمم/القيعان (Swing)", minval = 2, group = grpS)
+showBOS  = input.bool(true, "إظهار BOS / CHoCH", group = grpS)
+
+grpL = "💧 السيولة"
+eqTol    = input.float(0.08, "تسامح السيولة المتساوية (× ATR)", step = 0.01, group = grpL)
+showLiq  = input.bool(true, "إظهار مناطق السيولة + الاصطياد", group = grpL)
+
+grpO = "📦 أوردر بلوك / FVG"
+showOB   = input.bool(true, "Order Blocks", group = grpO)
+showFVG  = input.bool(true, "Fair Value Gaps", group = grpO)
+obMax    = input.int(6, "عدد الـ OB الظاهرة", minval = 1, maxval = 20, group = grpO)
+mitigate = input.bool(true, "حذف المناطق بعد الاختراق", group = grpO)
+
+grpF = "🎯 الفلاتر (قوة الإشارة)"
+useDelta = input.bool(true,  "فلتر الدلتا الحجمية", group = grpF)
+useKZ    = input.bool(true,  "فلتر Kill Zones", group = grpF)
+usePD    = input.bool(true,  "فلتر Premium/Discount", group = grpF)
+minScore = input.int(3, "أقل درجة لقبول الإشارة (0-5)", minval = 0, maxval = 5, group = grpF)
+
+grpR = "🛡️ إدارة المخاطر"
+atrMult  = input.float(1.2, "وقف الخسارة (× ATR)", step = 0.1, group = grpR)
+rr1      = input.float(2.0, "الهدف 1 (R:R)", step = 0.5, group = grpR)
+rr2      = input.float(3.5, "الهدف 2 (R:R)", step = 0.5, group = grpR)
+
+grpV = "🎨 المظهر"
+cBull = input.color(color.new(#00E5A0, 0), "صاعد", group = grpV, inline = "c")
+cBear = input.color(color.new(#FF3B5C, 0), "هابط", group = grpV, inline = "c")
+showDash = input.bool(true, "لوحة المعلومات", group = grpV)
+
+// ───────────── CORE ─────────────
+atr = ta.atr(14)
+
+// Swing points (pivot-based structure)
+ph = ta.pivothigh(high, swLen, swLen)
+pl = ta.pivotlow (low,  swLen, swLen)
+
+var float lastPH   = na
+var float lastPL   = na
+var int   lastPHb  = na
+var int   lastPLb  = na
+var float prevPH   = na
+var float prevPL   = na
+
+if not na(ph)
+    prevPH  := lastPH
+    lastPH  := ph
+    lastPHb := bar_index - swLen
+if not na(pl)
+    prevPL  := lastPL
+    lastPL  := pl
+    lastPLb := bar_index - swLen
+
+// Trend state via BOS / CHoCH
+var int trend = 0          // 1 = bullish structure, -1 = bearish
+var bool bosUp = false, bosDn = false, chochUp = false, chochDn = false
+bosUp := false, bosDn := false, chochUp := false, chochDn := false
+
+if not na(lastPH) and ta.crossover(close, lastPH)
+    if trend == -1
+        chochUp := true
+    else
+        bosUp := true
+    trend := 1
+    lastPH := na
+
+if not na(lastPL) and ta.crossunder(close, lastPL)
+    if trend == 1
+        chochDn := true
+    else
+        bosDn := true
+    trend := -1
+    lastPL := na
+
+// ───────────── LIQUIDITY SWEEP (Stop Hunt) ─────────────
+// اصطياد السيولة: الفتيل يخترق قمة/قاع سابق ثم يغلق داخله
+sweepHi = not na(prevPH) and high > prevPH and close < prevPH
+sweepLo = not na(prevPL) and low  < prevPL and close > prevPL
+
+// سيولة متساوية (Equal Highs / Lows) — مغناطيس المؤسسات
+eqH = not na(lastPH) and not na(prevPH) and math.abs(lastPH - prevPH) <= eqTol * atr
+eqL = not na(lastPL) and not na(prevPL) and math.abs(lastPL - prevPL) <= eqTol * atr
+
+// ───────────── DELTA VOLUME PRESSURE ─────────────
+rng    = math.max(high - low, syminfo.mintick)
+buyV   = volume * (close - low)  / rng
+sellV  = volume * (high - close) / rng
+delta  = buyV - sellV
+dNorm  = ta.ema(delta, 14) / math.max(ta.ema(volume, 14), 1)   // -1 .. +1
+bullDelta = dNorm > 0.05
+bearDelta = dNorm < -0.05
+
+// ───────────── KILL ZONES ─────────────
+inLondon = not na(time(timeframe.period, "0700-1000:1234567", "UTC"))
+inNY     = not na(time(timeframe.period, "1230-1600:1234567", "UTC"))
+inKZ     = inLondon or inNY
+
+// ───────────── PREMIUM / DISCOUNT ─────────────
+rangeHi = ta.highest(high, 50)
+rangeLo = ta.lowest (low,  50)
+eq50    = (rangeHi + rangeLo) / 2
+inDiscount = close < eq50
+inPremium  = close > eq50
+
+// ───────────── FAIR VALUE GAP ─────────────
+type FVG
+    float top
+    float bot
+    int   dir
+    box   bx
+
+var array<FVG> fvgs = array.new<FVG>()
+
+bullFVG = low > high[2] and close[1] > open[1]
+bearFVG = high < low[2] and close[1] < open[1]
+
+if showFVG and bullFVG
+    b = box.new(bar_index - 2, low, bar_index + 12, high[2], border_color = color.new(cBull, 60), bgcolor = color.new(cBull, 88))
+    array.push(fvgs, FVG.new(low, high[2], 1, b))
+if showFVG and bearFVG
+    b = box.new(bar_index - 2, low[2], bar_index + 12, high, border_color = color.new(cBear, 60), bgcolor = color.new(cBear, 88))
+    array.push(fvgs, FVG.new(low[2], high, -1, b))
+
+// تنظيف / تمديد الـ FVG
+if array.size(fvgs) > 0
+    for i = array.size(fvgs) - 1 to 0
+        f = array.get(fvgs, i)
+        filled = f.dir == 1 ? close < f.bot : close > f.top
+        if mitigate and filled
+            box.delete(f.bx)
+            array.remove(fvgs, i)
+        else
+            box.set_right(f.bx, bar_index + 12)
+        if array.size(fvgs) > 30
+            g = array.shift(fvgs)
+            box.delete(g.bx)
+
+// ───────────── ORDER BLOCKS ─────────────
+type OB
+    float top
+    float bot
+    int   dir
+    box   bx
+    label lb
+
+var array<OB> obs = array.new<OB>()
+
+impulse = math.abs(close - open) > atr * 0.9
+
+// آخر شمعة هابطة قبل اندفاع صاعد = Bullish OB
+newBullOB = impulse and close > open and close[1] < open[1] and (bosUp or chochUp or bullFVG)
+newBearOB = impulse and close < open and close[1] > open[1] and (bosDn or chochDn or bearFVG)
+
+if showOB and newBullOB
+    t = math.max(open[1], close[1]), bt = low[1]
+    b = box.new(bar_index - 1, t, bar_index + 15, bt, border_color = cBull, bgcolor = color.new(cBull, 85))
+    l = label.new(bar_index + 15, t, "OB+", style = label.style_label_left, color = color.new(cBull, 20), textcolor = color.white, size = size.tiny)
+    array.push(obs, OB.new(t, bt, 1, b, l))
+if showOB and newBearOB
+    t = high[1], bt = math.min(open[1], close[1])
+    b = box.new(bar_index - 1, t, bar_index + 15, bt, border_color = cBear, bgcolor = color.new(cBear, 85))
+    l = label.new(bar_index + 15, bt, "OB-", style = label.style_label_left, color = color.new(cBear, 20), textcolor = color.white, size = size.tiny)
+    array.push(obs, OB.new(t, bt, -1, b, l))
+
+var bool obTapBull = false
+var bool obTapBear = false
+obTapBull := false
+obTapBear := false
+
+if array.size(obs) > 0
+    for i = array.size(obs) - 1 to 0
+        o = array.get(obs, i)
+        // لمس المنطقة
+        if o.dir == 1 and low <= o.top and high >= o.bot
+            obTapBull := true
+        if o.dir == -1 and high >= o.bot and low <= o.top
+            obTapBear := true
+        broken = o.dir == 1 ? close < o.bot : close > o.top
+        if mitigate and broken
+            box.delete(o.bx), label.delete(o.lb)
+            array.remove(obs, i)
+        else
+            box.set_right(o.bx, bar_index + 15)
+            label.set_x(o.lb, bar_index + 15)
+        if array.size(obs) > obMax
+            g = array.shift(obs)
+            box.delete(g.bx), label.delete(g.lb)
+
+// ───────────── SIGNAL SCORING (0-5) ─────────────
+scoreLong  = 0
+scoreShort = 0
+
+// 1) الهيكل
+scoreLong  += (chochUp or bosUp)  ? 1 : 0
+scoreShort += (chochDn or bosDn)  ? 1 : 0
+// 2) اصطياد السيولة
+scoreLong  += sweepLo ? 1 : 0
+scoreShort += sweepHi ? 1 : 0
+// 3) منطقة مؤسساتية (OB / FVG)
+scoreLong  += (obTapBull or bullFVG) ? 1 : 0
+scoreShort += (obTapBear or bearFVG) ? 1 : 0
+// 4) الدلتا
+scoreLong  += (not useDelta or bullDelta) ? 1 : 0
+scoreShort += (not useDelta or bearDelta) ? 1 : 0
+// 5) التوقيت + التسعير
+kzOK = not useKZ or inKZ
+scoreLong  += (kzOK and (not usePD or inDiscount)) ? 1 : 0
+scoreShort += (kzOK and (not usePD or inPremium))  ? 1 : 0
+
+var int lastSigBar = -999
+cooldown = bar_index - lastSigBar > swLen
+
+longSig  = scoreLong  >= minScore and scoreLong  > scoreShort and cooldown
+shortSig = scoreShort >= minScore and scoreShort > scoreLong  and cooldown
+
+// ───────────── ENTRY / SL / TP ─────────────
+var float ePrice = na, var float sl = na, var float tp1 = na, var float tp2 = na
+
+if longSig
+    ePrice := close
+    sl     := close - atr * atrMult
+    tp1    := close + atr * atrMult * rr1
+    tp2    := close + atr * atrMult * rr2
+    lastSigBar := bar_index
+if shortSig
+    ePrice := close
+    sl     := close + atr * atrMult
+    tp1    := close - atr * atrMult * rr1
+    tp2    := close - atr * atrMult * rr2
+    lastSigBar := bar_index
+
+// ───────────── PLOTS ─────────────
+plotshape(showBOS and bosUp,   "BOS↑",   shape.triangleup,   location.belowbar, cBull, size = size.tiny, text = "BOS")
+plotshape(showBOS and bosDn,   "BOS↓",   shape.triangledown, location.abovebar, cBear, size = size.tiny, text = "BOS")
+plotshape(showBOS and chochUp, "CHoCH↑", shape.diamond,      location.belowbar, color.new(cBull,20), size = size.tiny, text = "CHoCH")
+plotshape(showBOS and chochDn, "CHoCH↓", shape.diamond,      location.abovebar, color.new(cBear,20), size = size.tiny, text = "CHoCH")
+
+plotshape(showLiq and sweepLo, "Sweep Low",  shape.xcross, location.belowbar, color.yellow, size = size.tiny, text = "💧")
+plotshape(showLiq and sweepHi, "Sweep High", shape.xcross, location.abovebar, color.orange, size = size.tiny, text = "💧")
+
+plotshape(longSig,  "LONG",  shape.labelup,   location.belowbar, cBull, text = "BUY",  textcolor = color.white, size = size.small)
+plotshape(shortSig, "SHORT", shape.labeldown, location.abovebar, cBear, text = "SELL", textcolor = color.white, size = size.small)
+
+// خطوط الصفقة
+plot(na(ePrice) ? na : ePrice, "Entry", color.new(color.gray, 30),  1, plot.style_linebr)
+plot(na(sl)     ? na : sl,     "SL",    color.new(cBear, 20),       1, plot.style_linebr)
+plot(na(tp1)    ? na : tp1,    "TP1",   color.new(cBull, 40),       1, plot.style_linebr)
+plot(na(tp2)    ? na : tp2,    "TP2",   color.new(cBull, 10),       1, plot.style_linebr)
+
+// خلفية Kill Zone
+bgcolor(useKZ and inKZ ? color.new(color.blue, 94) : na, title = "Kill Zone")
+
+// ───────────── DASHBOARD ─────────────
+if showDash and barstate.islast
+    var table t = table.new(position.top_right, 2, 8, border_width = 1)
+    table.cell(t, 0, 0, "APEX ⚡ ENGINE", bgcolor = color.new(color.black, 10), text_color = color.white, text_size = size.small)
+    table.cell(t, 1, 0, timeframe.period,  bgcolor = color.new(color.black, 10), text_color = color.white, text_size = size.small)
+    table.cell(t, 0, 1, "الهيكل", text_size = size.tiny, text_color = color.gray)
+    table.cell(t, 1, 1, trend == 1 ? "صاعد ▲" : trend == -1 ? "هابط ▼" : "محايد", text_color = trend == 1 ? cBull : trend == -1 ? cBear : color.gray, text_size = size.tiny)
+    table.cell(t, 0, 2, "التسعير", text_size = size.tiny, text_color = color.gray)
+    table.cell(t, 1, 2, inDiscount ? "خصم (شراء)" : "بريميوم (بيع)", text_color = inDiscount ? cBull : cBear, text_size = size.tiny)
+    table.cell(t, 0, 3, "الدلتا", text_size = size.tiny, text_color = color.gray)
+    table.cell(t, 1, 3, str.tostring(dNorm * 100, "#.0") + "%", text_color = dNorm > 0 ? cBull : cBear, text_size = size.tiny)
+    table.cell(t, 0, 4, "Kill Zone", text_size = size.tiny, text_color = color.gray)
+    table.cell(t, 1, 4, inLondon ? "لندن 🇬🇧" : inNY ? "نيويورك 🇺🇸" : "خارج الجلسة", text_color = inKZ ? color.yellow : color.gray, text_size = size.tiny)
+    table.cell(t, 0, 5, "قوة الشراء", text_size = size.tiny, text_color = color.gray)
+    table.cell(t, 1, 5, str.tostring(scoreLong) + "/5", text_color = cBull, text_size = size.tiny)
+    table.cell(t, 0, 6, "قوة البيع", text_size = size.tiny, text_color = color.gray)
+    table.cell(t, 1, 6, str.tostring(scoreShort) + "/5", text_color = cBear, text_size = size.tiny)
+    table.cell(t, 0, 7, "ATR", text_size = size.tiny, text_color = color.gray)
+    table.cell(t, 1, 7, str.tostring(atr, format.mintick), text_size = size.tiny, text_color = color.white)
+
+// ───────────── ALERTS ─────────────
+alertcondition(longSig,  "APEX BUY",  "APEX ⚡ إشارة شراء | {{ticker}} {{interval}} @ {{close}}")
+alertcondition(shortSig, "APEX SELL", "APEX ⚡ إشارة بيع | {{ticker}} {{interval}} @ {{close}}")
+alertcondition(sweepHi,  "Liquidity Sweep High", "اصطياد سيولة علوي 💧 {{ticker}}")
+alertcondition(sweepLo,  "Liquidity Sweep Low",  "اصطياد سيولة سفلي 💧 {{ticker}}")
+alertcondition(chochUp or chochDn, "CHoCH", "تغير شخصية السوق ⚠️ {{ticker}}")

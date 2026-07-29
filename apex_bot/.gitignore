@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+venv/
+trades*.csv
+*_trades.csv
+output/
