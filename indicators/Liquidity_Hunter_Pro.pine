@@ -1,0 +1,379 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════
+//  LIQUIDITY HUNTER PRO — SMC Confluence Engine  |  صياد السيولة
+//  ─────────────────────────────────────────────────────────────────────
+//  الفكرة (Out-of-the-box):
+//  بدل ما نرسم كل المناطق (ضجيج)، المحرك يحسب "نقاط التقاء"
+//  Confluence Score من 0 إلى 100 لكل إعداد، ويرسم فقط مناطق A / A+
+//  (النقاط ≥ الحد الأدنى). كل منطقة = سيولة + إزاحة + FVG + انحياز HTF
+//
+//  النقاط:  Sweep = 30 | Displacement = 25 | FVG = 20 | HTF = 15 | Vol = 10
+//  التوقيتات تلقائية: 15m (دخول) ← 1H (انحياز) ← 4H (انحياز أعلى)
+//  التصميم: مناطق متوهجة (3 طبقات) + نبض حي + سهم يتحرك + لوحة Score
+// ═══════════════════════════════════════════════════════════════════════
+indicator("Liquidity Hunter Pro — SMC Confluence Engine", shorttitle="LH Pro", overlay=true, max_boxes_count=500, max_labels_count=500, max_lines_count=200)
+
+// ─────────────────────────────── INPUTS ───────────────────────────────
+grpTF = "⏱️ Multi-Timeframe — Auto (15m / 1H / 4H)"
+autoTF  = input.bool(true, "Auto Timeframes", group=grpTF, tooltip="ON: Entry = chart TF → Mid = 4× → High = 16×\n(15m chart → 1H bias → 4H bias). OFF: use manual TFs below.")
+inEntry = input.timeframe("15",  "Entry TF (manual)", group=grpTF)
+inMid   = input.timeframe("60",  "Mid TF — Bias (manual)", group=grpTF)
+inHigh  = input.timeframe("240", "High TF — Bias (manual)", group=grpTF)
+
+grpST = "🧱 Structure & Swings"
+swingLen   = input.int(5, "Swing Length (pivots)", minval=2, maxval=20, group=grpST)
+showBOS    = input.bool(true, "Show BOS / CHoCH", group=grpST)
+showSwings = input.bool(false, "Show Swing Points", group=grpST)
+
+grpSW = "💧 Liquidity Sweeps"
+sweepMinATR = input.float(0.10, "Min Sweep Depth (×ATR)", minval=0.0, step=0.05, group=grpSW)
+showSweeps  = input.bool(true, "Show Sweep Markers", group=grpSW)
+
+grpDP = "⚡ Displacement & FVG"
+dispMult  = input.float(1.5, "Displacement Body (×ATR)", minval=0.5, step=0.1, group=grpDP)
+fvgMinATR = input.float(0.15, "Min FVG Size (×ATR)", minval=0.0, step=0.05, group=grpDP)
+showFVG   = input.bool(true, "Show FVG Zones", group=grpDP)
+
+grpSC = "🎯 Confluence Score (0–100)"
+minScore    = input.int(60, "Min Score to Draw Zone", minval=0, maxval=100, group=grpSC)
+confirmBars = input.int(5, "Sweep → Displacement Window (bars)", minval=1, maxval=20, group=grpSC)
+useVol      = input.bool(true, "Volume Confirmation (+10 pts)", group=grpSC)
+useHTF      = input.bool(true, "HTF Bias Alignment (+15 pts)", group=grpSC)
+maxZones    = input.int(30, "Max Active Zones", minval=5, maxval=60, group=grpSC)
+
+grpVS = "🎨 Visuals & Animation"
+showGlow    = input.bool(true, "Glow Zones (triple-layer)", group=grpVS)
+showPulse   = input.bool(true, "Live Pulse + Bobbing Arrow", group=grpVS)
+extendBars  = input.int(15, "Zone Extension (bars)", minval=5, maxval=50, group=grpVS)
+showPD      = input.bool(true, "Premium / Discount Bands", group=grpVS)
+showKZ      = input.bool(false, "Kill Zones — London / NY (UTC)", group=grpVS)
+showTrendBG = input.bool(false, "Trend Background Tint", group=grpVS)
+showDash    = input.bool(true, "Dashboard", group=grpVS)
+rangeLen    = input.int(100, "Dealing Range Length", minval=20, maxval=500, group=grpVS)
+
+// ───────────────────── TIMEFRAME RESOLUTION (AUTO) ────────────────────
+// 15m chart → Entry 15m / Mid 1H / High 4H  |  1H chart → 1H / 4H / 1D ...
+chartSec = timeframe.in_seconds(timeframe.period)
+effEntry = autoTF ? timeframe.period : inEntry
+effMid   = autoTF ? (chartSec <= 900 ? "60" : chartSec <= 3600 ? "240" : "D") : inMid
+effHigh  = autoTF ? (chartSec <= 900 ? "240" : chartSec <= 3600 ? "D" : "W") : inHigh
+
+// ───────────────────────── CORE CALCULATIONS ──────────────────────────
+atr    = ta.atr(14)
+volSMA = ta.sma(volume, 20)
+volOK  = useVol ? (not na(volume) and not na(volSMA) and volume > volSMA * 1.2) : true
+
+// ───────────────────────────── STATE ──────────────────────────────────
+var float lastSH = na
+var float lastSL = na
+var int   trend  = 0
+var bool  canBull = true
+var bool  canBear = true
+var int   barsBullSweep = 999
+var int   barsBearSweep = 999
+var float bullSweepLow  = na
+var float bearSweepHigh = na
+
+var zGlow  = array.new<box>()
+var zMid   = array.new<box>()
+var zCore  = array.new<box>()
+var zLbl   = array.new<label>()
+var zDir   = array.new<int>()
+var zScore = array.new<int>()
+var zTop   = array.new<float>()
+var zBot   = array.new<float>()
+var zMit   = array.new<bool>()
+var zBirth = array.new<int>()
+
+// ───────────────────────── HELPER FUNCTIONS ───────────────────────────
+f_bias(tf) =>
+    e50  = request.security(syminfo.tickerid, tf, ta.ema(close, 50),  lookahead=barmerge.lookahead_on)
+    e200 = request.security(syminfo.tickerid, tf, ta.ema(close, 200), lookahead=barmerge.lookahead_on)
+    e50 > e200 ? 1 : e50 < e200 ? -1 : 0
+
+f_tier(score) =>
+    score >= 85 ? "A+" : score >= 70 ? "A" : "B"
+
+f_tierColor(score) =>
+    score >= 85 ? color.new(color.orange, 0) : score >= 70 ? color.new(color.blue, 0) : color.new(color.gray, 0)
+
+f_score(sweepRecent, disp, fvg, htfOK) =>
+    s = 0
+    s += sweepRecent ? 30 : 0
+    s += disp ? 25 : 0
+    s += fvg ? 20 : 0
+    s += htfOK ? 15 : 0
+    s += volOK ? 10 : 0
+    s
+
+f_obBull() =>
+    r = -1
+    for i = 1 to 10
+        if r == -1 and close[i] < open[i]
+            r := i
+    r
+
+f_obBear() =>
+    r = -1
+    for i = 1 to 10
+        if r == -1 and close[i] > open[i]
+            r := i
+    r
+
+f_tfName(tf) =>
+    tf == "D" ? "1D" : tf == "W" ? "1W" : tf == "M" ? "1M" : tf + "m"
+
+f_newZone(dir, score, top, bot) =>
+    bull  = dir == 1
+    cMain = bull ? color.new(#00E5FF, 0) : color.new(#FF3D71, 0)
+    cTier = f_tierColor(score)
+    g = box.new(bar_index, top, bar_index + 1, bot, bgcolor=color.new(cMain, showGlow ? 90 : 82), border_color=color.new(cMain, 100), border_width=0, xloc=xloc.bar_index)
+    m = box.new(bar_index, top, bar_index + 1, bot, bgcolor=color.new(cMain, 80), border_color=color.new(cMain, 100), border_width=0, xloc=xloc.bar_index)
+    c = box.new(bar_index, top, bar_index + 1, bot, bgcolor=color.new(cMain, 70), border_color=cTier, border_width=2, xloc=xloc.bar_index)
+    lbl = label.new(bar_index, (top + bot) / 2, (bull ? "▲ " : "▼ ") + f_tier(score) + " · " + str.tostring(score), style=label.style_label_left, textcolor=color.white, color=color.new(cMain, 5), size=size.small, xloc=xloc.bar_index)
+    array.push(zGlow, g)
+    array.push(zMid, m)
+    array.push(zCore, c)
+    array.push(zLbl, lbl)
+    array.push(zDir, dir)
+    array.push(zScore, score)
+    array.push(zTop, top)
+    array.push(zBot, bot)
+    array.push(zMit, false)
+    array.push(zBirth, bar_index)
+    if array.size(zDir) > maxZones
+        box.delete(array.get(zGlow, 0))
+        box.delete(array.get(zMid, 0))
+        box.delete(array.get(zCore, 0))
+        label.delete(array.get(zLbl, 0))
+        array.remove(zGlow, 0)
+        array.remove(zMid, 0)
+        array.remove(zCore, 0)
+        array.remove(zLbl, 0)
+        array.remove(zDir, 0)
+        array.remove(zScore, 0)
+        array.remove(zTop, 0)
+        array.remove(zBot, 0)
+        array.remove(zMit, 0)
+        array.remove(zBirth, 0)
+
+f_bar(score) =>
+    filled = int(score / 10)
+    s = ""
+    for i = 0 to 9
+        s += i < filled ? "█" : "░"
+    s
+
+// ─────────────────────── HTF BIAS (1H / 4H) ───────────────────────────
+biasMid  = f_bias(effMid)
+biasHigh = f_bias(effHigh)
+htfBullOK = biasHigh == 1 or biasMid == 1
+htfBearOK = biasHigh == -1 or biasMid == -1
+
+// ─────────────────── SWINGS & MARKET STRUCTURE ────────────────────────
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+if not na(ph)
+    lastSH := ph
+    canBull := true
+if not na(pl)
+    lastSL := pl
+    canBear := true
+
+bosBull   = false
+bosBear   = false
+chochBull = false
+chochBear = false
+
+if canBull and not na(lastSH) and close > lastSH
+    if trend == -1
+        chochBull := true
+    else
+        bosBull := true
+    trend := 1
+    canBull := false
+if canBear and not na(lastSL) and close < lastSL
+    if trend == 1
+        chochBear := true
+    else
+        bosBear := true
+    trend := -1
+    canBear := false
+
+// ─────────────────────── LIQUIDITY SWEEPS ─────────────────────────────
+// Wick beyond the swing + close back inside + fresh cross-back event
+bullSweep = not na(lastSL) and low < lastSL and close > lastSL and close[1] <= lastSL and (lastSL - low) > atr * sweepMinATR
+bearSweep = not na(lastSH) and high > lastSH and close < lastSH and close[1] >= lastSH and (high - lastSH) > atr * sweepMinATR
+
+if bullSweep
+    barsBullSweep := 0
+    bullSweepLow := low
+else
+    barsBullSweep += 1
+if bearSweep
+    barsBearSweep := 0
+    bearSweepHigh := high
+else
+    barsBearSweep += 1
+
+// ───────────────────── DISPLACEMENT & FVG ─────────────────────────────
+bodySize = math.abs(close - open)
+bullDisp = close > open and bodySize > atr * dispMult
+bearDisp = close < open and bodySize > atr * dispMult
+
+bullFVG = low > high[2] and (low - high[2]) > atr * fvgMinATR
+bearFVG = high < low[2] and (low[2] - high) > atr * fvgMinATR
+
+// ───────────────────── SETUPS & CONFLUENCE SCORE ──────────────────────
+bullSweepRecent = barsBullSweep <= confirmBars
+bearSweepRecent = barsBearSweep <= confirmBars
+
+bullSetup = bullSweepRecent and bullDisp
+bearSetup = bearSweepRecent and bearDisp
+
+scoreBull = f_score(bullSweepRecent, bullDisp, bullFVG, htfBullOK)
+scoreBear = f_score(bearSweepRecent, bearDisp, bearFVG, htfBearOK)
+
+liveScore = bullSetup ? scoreBull : bearSetup ? scoreBear : 0
+liveDir   = bullSetup ? 1 : bearSetup ? -1 : 0
+
+// ─────────────────────── ZONE CREATION (A / A+ only) ──────────────────
+if bullSetup and scoreBull >= minScore
+    obIdx = f_obBull()
+    zT = obIdx > 0 ? high[obIdx] : high
+    zB = obIdx > 0 ? low[obIdx] : bullSweepLow
+    if not na(zB) and zT > zB
+        f_newZone(1, scoreBull, zT, zB)
+if bearSetup and scoreBear >= minScore
+    obIdx = f_obBear()
+    zT = obIdx > 0 ? high[obIdx] : bearSweepHigh
+    zB = obIdx > 0 ? low[obIdx] : low
+    if not na(zB) and zT > zB
+        f_newZone(-1, scoreBear, zT, zB)
+
+// ───────────────── ZONE MANAGEMENT (grow + mitigate) ──────────────────
+n = array.size(zDir)
+for i = 0 to n - 1
+    mit = array.get(zMit, i)
+    d   = array.get(zDir, i)
+    t   = array.get(zTop, i)
+    b   = array.get(zBot, i)
+    if not mit
+        age = bar_index - array.get(zBirth, i)
+        w   = math.min(extendBars, 1 + age * 2)
+        box.set_right(array.get(zGlow, i), bar_index + w)
+        box.set_right(array.get(zMid, i),  bar_index + w)
+        box.set_right(array.get(zCore, i), bar_index + w)
+        if (d == 1 and close < b) or (d == -1 and close > t)
+            array.set(zMit, i, true)
+            box.set_bgcolor(array.get(zGlow, i), color.new(color.gray, 93))
+            box.set_bgcolor(array.get(zMid, i),  color.new(color.gray, 91))
+            box.set_bgcolor(array.get(zCore, i), color.new(color.gray, 86))
+            box.set_border_color(array.get(zCore, i), color.new(color.gray, 50))
+            label.set_text(array.get(zLbl, i), "✕ MITIGATED")
+            label.set_color(array.get(zLbl, i), color.new(color.gray, 40))
+
+// ───────────────── LIVE PULSE ANIMATION (last bar) ────────────────────
+if showPulse and barstate.islast and n > 0
+    li = n - 1
+    if not array.get(zMit, li)
+        d = array.get(zDir, li)
+        cPulse = d == 1 ? #00E5FF : #FF3D71
+        ph1 = int(8 + 8 * math.sin(timenow / 160.0))
+        box.set_bgcolor(array.get(zGlow, li), color.new(cPulse, 84 + ph1))
+        box.set_bgcolor(array.get(zMid, li),  color.new(cPulse, 74 + ph1))
+        mid = (array.get(zTop, li) + array.get(zBot, li)) / 2
+        bob = math.sin(timenow / 240.0) * atr * 0.06
+        label.set_y(array.get(zLbl, li), mid + bob)
+
+// ───────────────────────────── VISUALS ────────────────────────────────
+// FVG zones
+if showFVG and bullFVG
+    box.new(bar_index - 2, low, bar_index + 10, high[2], bgcolor=color.new(#00E5FF, 85), border_color=color.new(#00E5FF, 100), border_width=0, xloc=xloc.bar_index)
+if showFVG and bearFVG
+    box.new(bar_index - 2, high, bar_index + 10, low[2], bgcolor=color.new(#FF3D71, 85), border_color=color.new(#FF3D71, 100), border_width=0, xloc=xloc.bar_index)
+
+// Sweep markers
+if showSweeps and bullSweep
+    label.new(bar_index, low, "💧 SWEEP", style=label.style_label_up, color=color.new(#00E5FF, 0), textcolor=color.black, size=size.tiny, xloc=xloc.bar_index)
+if showSweeps and bearSweep
+    label.new(bar_index, high, "💧 SWEEP", style=label.style_label_down, color=color.new(#FF3D71, 0), textcolor=color.white, size=size.tiny, xloc=xloc.bar_index)
+
+// BOS / CHoCH labels
+if showBOS and bosBull
+    label.new(bar_index, low, "BOS", style=label.style_label_up, color=color.new(color.blue, 20), textcolor=color.white, size=size.tiny, xloc=xloc.bar_index)
+if showBOS and bosBear
+    label.new(bar_index, high, "BOS", style=label.style_label_down, color=color.new(color.blue, 20), textcolor=color.white, size=size.tiny, xloc=xloc.bar_index)
+if showBOS and chochBull
+    label.new(bar_index, low, "CHoCH", style=label.style_label_up, color=color.new(color.orange, 0), textcolor=color.black, size=size.tiny, xloc=xloc.bar_index)
+if showBOS and chochBear
+    label.new(bar_index, high, "CHoCH", style=label.style_label_down, color=color.new(color.orange, 0), textcolor=color.black, size=size.tiny, xloc=xloc.bar_index)
+
+// Swing points
+if showSwings and not na(ph)
+    plotshape(ph, "Swing High", shape.diamond, location.above, color=color.new(color.white, 40), size=size.tiny)
+if showSwings and not na(pl)
+    plotshape(pl, "Swing Low", shape.diamond, location.below, color=color.new(color.white, 40), size=size.tiny)
+
+// Premium / Discount (dealing range equilibrium)
+rngH = ta.highest(high, rangeLen)
+rngL = ta.lowest(low, rangeLen)
+eq = (rngH + rngL) / 2
+plot(showPD ? eq : na, "Equilibrium 50%", color=color.new(color.white, 55), style=plot.style_linebr, linewidth=1)
+bgcolor(showPD and close > eq ? color.new(color.red, 96) : na, title="Premium Zone")
+bgcolor(showPD and close < eq ? color.new(color.green, 96) : na, title="Discount Zone")
+
+// Kill Zones (UTC)
+hr = hour(time, "UTC")
+inLondon = hr >= 8 and hr < 11
+inNY = hr >= 13 and hr < 16
+bgcolor(showKZ and inLondon ? color.new(color.blue, 94) : na, title="London Kill Zone")
+bgcolor(showKZ and inNY ? color.new(color.orange, 94) : na, title="NY Kill Zone")
+
+// Trend tint
+bgcolor(showTrendBG and trend == 1 ? color.new(#00E5FF, 97) : showTrendBG and trend == -1 ? color.new(#FF3D71, 97) : na, title="Trend Tint")
+
+// Setup arrows
+plotshape(bullSetup and scoreBull >= minScore, "LH Long", shape.triangleup, location.belowbar, color=color.new(#00E5FF, 0), size=size.small)
+plotshape(bearSetup and scoreBear >= minScore, "LH Short", shape.triangledown, location.abovebar, color=color.new(#FF3D71, 0), size=size.small)
+
+// Hidden score series (for alerts)
+plot(liveScore, "LH Score", display=display.none)
+
+// ─────────────────────────── DASHBOARD ────────────────────────────────
+sess = inNY ? "NY 🇺🇸" : inLondon ? "London 🇬🇧" : hr >= 0 and hr < 8 ? "Asia 🌏" : "Off ⏸️"
+
+var table dash = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 15), border_width=1, border_color=color.new(color.white, 70), frame_width=1, frame_color=color.new(color.white, 70))
+
+if showDash and barstate.islast
+    activeZones = 0
+    for i = 0 to array.size(zDir) - 1
+        if not array.get(zMit, i)
+            activeZones += 1
+    table.cell(dash, 0, 0, "⚡ LH PRO", text_color=color.white, bgcolor=color.new(#00B8D4, 0), text_size=size.normal)
+    table.cell(dash, 1, 0, "SMC ENGINE", text_color=color.white, bgcolor=color.new(#00B8D4, 0), text_size=size.normal)
+    table.cell(dash, 0, 1, f_tfName(effHigh) + " Bias", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, biasHigh == 1 ? "🟢 BULL" : biasHigh == -1 ? "🔴 BEAR" : "⚪ FLAT", text_color=biasHigh == 1 ? color.new(#00E5FF, 0) : biasHigh == -1 ? color.new(#FF3D71, 0) : color.white, text_size=size.small)
+    table.cell(dash, 0, 2, f_tfName(effMid) + " Bias", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 2, biasMid == 1 ? "🟢 BULL" : biasMid == -1 ? "🔴 BEAR" : "⚪ FLAT", text_color=biasMid == 1 ? color.new(#00E5FF, 0) : biasMid == -1 ? color.new(#FF3D71, 0) : color.white, text_size=size.small)
+    table.cell(dash, 0, 3, "Entry TF", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 3, f_tfName(effEntry), text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 4, "Live Score", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 4, f_bar(liveScore) + " " + str.tostring(liveScore), text_color=liveDir == 1 ? color.new(#00E5FF, 0) : liveDir == -1 ? color.new(#FF3D71, 0) : color.white, text_size=size.small)
+    table.cell(dash, 0, 5, "Active Zones", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 5, str.tostring(activeZones), text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 6, "Trend", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 6, trend == 1 ? "▲ Bullish" : trend == -1 ? "▼ Bearish" : "— Range", text_color=trend == 1 ? color.new(#00E5FF, 0) : trend == -1 ? color.new(#FF3D71, 0) : color.white, text_size=size.small)
+    table.cell(dash, 0, 7, "Session", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 7, sess, text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 8, "Signal", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 8, liveDir == 1 ? "▲ LONG" : liveDir == -1 ? "▼ SHORT" : "⏳ Wait", text_color=liveDir == 1 ? color.new(#00E5FF, 0) : liveDir == -1 ? color.new(#FF3D71, 0) : color.white, text_size=size.small)
+
+// ───────────────────────────── ALERTS ─────────────────────────────────
+alertcondition(bullSetup and scoreBull >= minScore, "LH Pro: Bullish Setup", "Liquidity Hunter PRO: Bullish setup — Score {{plot_0}}")
+alertcondition(bearSetup and scoreBear >= minScore, "LH Pro: Bearish Setup", "Liquidity Hunter PRO: Bearish setup — Score {{plot_0}}")
+alertcondition(bullSweep, "LH Pro: Bullish Sweep", "Liquidity Hunter PRO: Bullish liquidity sweep detected")
+alertcondition(bearSweep, "LH Pro: Bearish Sweep", "Liquidity Hunter PRO: Bearish liquidity sweep detected")
+alertcondition(chochBull, "LH Pro: Bullish CHoCH", "Liquidity Hunter PRO: Bullish CHoCH")
+alertcondition(chochBear, "LH Pro: Bearish CHoCH", "Liquidity Hunter PRO: Bearish CHoCH")

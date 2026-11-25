@@ -1,0 +1,204 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════
+//  LIQUIDITY HUNTER — SMC Strategy  |  استراتيجية صياد السيولة
+//  ─────────────────────────────────────────────────────────────────────
+//  نفس محرك المؤشر، لكن كاستراتيجية قابلة للباكتيست:
+//  الدخول = Sweep + Displacement + Score ≥ الحد + انحياز HTF
+//           + (اختياري) Discount للشراء / Premium للبيع + Kill Zone
+//  الوقف = خلف طرف الـ Sweep + ATR Buffer
+//  الهدف = RR × المخاطرة  |  + Time Stop + Trailing اختياري
+//  التوقيتات تلقائية: 15m (دخول) ← 1H ← 4H
+// ═══════════════════════════════════════════════════════════════════════
+strategy("Liquidity Hunter — SMC Strategy", shorttitle="LH Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.05, pyramiding=0, calc_on_every_tick=false)
+
+// ─────────────────────────────── INPUTS ───────────────────────────────
+grpTF = "⏱️ Multi-Timeframe — Auto (15m / 1H / 4H)"
+autoTF  = input.bool(true, "Auto Timeframes", group=grpTF, tooltip="ON: Entry = chart TF → Mid = 4× → High = 16×\n(15m chart → 1H bias → 4H bias). OFF: use manual TFs below.")
+inEntry = input.timeframe("15",  "Entry TF (manual)", group=grpTF)
+inMid   = input.timeframe("60",  "Mid TF — Bias (manual)", group=grpTF)
+inHigh  = input.timeframe("240", "High TF — Bias (manual)", group=grpTF)
+
+grpST = "🧱 Structure & Swings"
+swingLen = input.int(5, "Swing Length (pivots)", minval=2, maxval=20, group=grpST)
+
+grpSW = "💧 Liquidity Sweeps"
+sweepMinATR = input.float(0.10, "Min Sweep Depth (×ATR)", minval=0.0, step=0.05, group=grpSW)
+
+grpDP = "⚡ Displacement & FVG"
+dispMult  = input.float(1.5, "Displacement Body (×ATR)", minval=0.5, step=0.1, group=grpDP)
+fvgMinATR = input.float(0.15, "Min FVG Size (×ATR)", minval=0.0, step=0.05, group=grpDP)
+
+grpSC = "🎯 Confluence Score & Filters"
+minScore    = input.int(70, "Min Score to Trade", minval=0, maxval=100, group=grpSC)
+confirmBars = input.int(5, "Sweep → Displacement Window (bars)", minval=1, maxval=20, group=grpSC)
+useVol      = input.bool(true, "Volume Confirmation (+10 pts)", group=grpSC)
+useHTF      = input.bool(true, "Require HTF Bias Alignment", group=grpSC)
+usePD       = input.bool(true, "Longs in Discount / Shorts in Premium", group=grpSC)
+useKZ       = input.bool(false, "Kill Zone Filter (London/NY UTC)", group=grpSC)
+rangeLen    = input.int(100, "Dealing Range Length", minval=20, maxval=500, group=grpSC)
+
+grpRK = "🛡️ Risk Management"
+rr        = input.float(2.5, "Risk : Reward", minval=0.5, step=0.1, group=grpRK)
+slBuf     = input.float(0.5, "SL Buffer (×ATR)", minval=0.0, step=0.1, group=grpRK)
+maxBars   = input.int(50, "Max Bars in Trade (time stop)", minval=5, maxval=500, group=grpRK)
+useTrail  = input.bool(false, "Trailing Stop", group=grpRK)
+trailMult = input.float(1.5, "Trail Offset (×ATR)", minval=0.5, step=0.1, group=grpRK)
+
+// ───────────────────── TIMEFRAME RESOLUTION (AUTO) ────────────────────
+chartSec = timeframe.in_seconds(timeframe.period)
+effEntry = autoTF ? timeframe.period : inEntry
+effMid   = autoTF ? (chartSec <= 900 ? "60" : chartSec <= 3600 ? "240" : "D") : inMid
+effHigh  = autoTF ? (chartSec <= 900 ? "240" : chartSec <= 3600 ? "D" : "W") : inHigh
+
+// ───────────────────────── CORE CALCULATIONS ──────────────────────────
+atr    = ta.atr(14)
+volSMA = ta.sma(volume, 20)
+volOK  = useVol ? (not na(volume) and not na(volSMA) and volume > volSMA * 1.2) : true
+
+// ───────────────────────────── STATE ──────────────────────────────────
+var float lastSH = na
+var float lastSL = na
+var int   barsBullSweep = 999
+var int   barsBearSweep = 999
+var float bullSweepLow  = na
+var float bearSweepHigh = na
+var int   entryBar = na
+var float posSL = na
+var float posTP = na
+
+// ───────────────────────── HELPER FUNCTIONS ───────────────────────────
+f_bias(tf) =>
+    e50  = request.security(syminfo.tickerid, tf, ta.ema(close, 50),  lookahead=barmerge.lookahead_on)
+    e200 = request.security(syminfo.tickerid, tf, ta.ema(close, 200), lookahead=barmerge.lookahead_on)
+    e50 > e200 ? 1 : e50 < e200 ? -1 : 0
+
+f_score(sweepRecent, disp, fvg, htfOK) =>
+    s = 0
+    s += sweepRecent ? 30 : 0
+    s += disp ? 25 : 0
+    s += fvg ? 20 : 0
+    s += htfOK ? 15 : 0
+    s += volOK ? 10 : 0
+    s
+
+// ─────────────────────── HTF BIAS (1H / 4H) ───────────────────────────
+biasMid  = f_bias(effMid)
+biasHigh = f_bias(effHigh)
+htfBullOK = biasHigh == 1 or biasMid == 1
+htfBearOK = biasHigh == -1 or biasMid == -1
+
+// ─────────────────── SWINGS & LIQUIDITY SWEEPS ────────────────────────
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+if not na(ph)
+    lastSH := ph
+if not na(pl)
+    lastSL := pl
+
+bullSweep = not na(lastSL) and low < lastSL and close > lastSL and close[1] <= lastSL and (lastSL - low) > atr * sweepMinATR
+bearSweep = not na(lastSH) and high > lastSH and close < lastSH and close[1] >= lastSH and (high - lastSH) > atr * sweepMinATR
+
+if bullSweep
+    barsBullSweep := 0
+    bullSweepLow := low
+else
+    barsBullSweep += 1
+if bearSweep
+    barsBearSweep := 0
+    bearSweepHigh := high
+else
+    barsBearSweep += 1
+
+// ───────────────────── DISPLACEMENT & FVG ─────────────────────────────
+bodySize = math.abs(close - open)
+bullDisp = close > open and bodySize > atr * dispMult
+bearDisp = close < open and bodySize > atr * dispMult
+
+bullFVG = low > high[2] and (low - high[2]) > atr * fvgMinATR
+bearFVG = high < low[2] and (low[2] - high) > atr * fvgMinATR
+
+// ───────────────────── SETUPS & CONFLUENCE SCORE ──────────────────────
+bullSweepRecent = barsBullSweep <= confirmBars
+bearSweepRecent = barsBearSweep <= confirmBars
+
+scoreBull = f_score(bullSweepRecent, bullDisp, bullFVG, htfBullOK)
+scoreBear = f_score(bearSweepRecent, bearDisp, bearFVG, htfBearOK)
+
+// Premium / Discount equilibrium
+rngH = ta.highest(high, rangeLen)
+rngL = ta.lowest(low, rangeLen)
+eq = (rngH + rngL) / 2
+
+// Kill Zones (UTC)
+hr = hour(time, "UTC")
+inKZ = (hr >= 8 and hr < 11) or (hr >= 13 and hr < 16)
+
+longOK  = (not useHTF or htfBullOK) and (not usePD or close < eq) and (not useKZ or inKZ)
+shortOK = (not useHTF or htfBearOK) and (not usePD or close > eq) and (not useKZ or inKZ)
+
+longSetup  = bullSweepRecent and bullDisp and scoreBull >= minScore and longOK
+shortSetup = bearSweepRecent and bearDisp and scoreBear >= minScore and shortOK
+
+// ─────────────────────────── ENTRIES ──────────────────────────────────
+if longSetup and strategy.position_size == 0
+    posSL := bullSweepLow - atr * slBuf
+    risk = close - posSL
+    posTP := close + risk * rr
+    entryBar := bar_index
+    strategy.entry("Long", strategy.long, alert_message="LH PRO LONG — Liquidity Hunter Strategy")
+    strategy.exit("Long Exit", from_entry="Long", stop=posSL, limit=posTP, trail_price=useTrail ? close : na, trail_offset=useTrail ? atr * trailMult : na)
+
+if shortSetup and strategy.position_size == 0
+    posSL := bearSweepHigh + atr * slBuf
+    risk = posSL - close
+    posTP := close - risk * rr
+    entryBar := bar_index
+    strategy.entry("Short", strategy.short, alert_message="LH PRO SHORT — Liquidity Hunter Strategy")
+    strategy.exit("Short Exit", from_entry="Short", stop=posSL, limit=posTP, trail_price=useTrail ? close : na, trail_offset=useTrail ? atr * trailMult : na)
+
+// Time stop
+if strategy.position_size == 0
+    entryBar := na
+else if not na(entryBar) and bar_index - entryBar >= maxBars
+    strategy.close_all(comment="Time Stop")
+
+// ─────────────────────── SL / TP LINES ────────────────────────────────
+var line slLine = na
+var line tpLine = na
+if strategy.position_size != 0 and not na(posSL)
+    if na(slLine)
+        slLine := line.new(bar_index, posSL, bar_index + 10, posSL, color=color.new(color.red, 0), width=1, style=line.style_dashed)
+        tpLine := line.new(bar_index, posTP, bar_index + 10, posTP, color=color.new(color.green, 0), width=1, style=line.style_dashed)
+    else
+        line.set_xy1(slLine, bar_index, posSL)
+        line.set_xy2(slLine, bar_index + 10, posSL)
+        line.set_xy1(tpLine, bar_index, posTP)
+        line.set_xy2(tpLine, bar_index + 10, posTP)
+else
+    line.delete(slLine)
+    line.delete(tpLine)
+    slLine := na
+    tpLine := na
+
+// ─────────────────────────── VISUALS ──────────────────────────────────
+plotshape(longSetup, "LH Long", shape.triangleup, location.belowbar, color=color.new(#00E5FF, 0), size=size.small)
+plotshape(shortSetup, "LH Short", shape.triangledown, location.abovebar, color=color.new(#FF3D71, 0), size=size.small)
+plot(showPD ? eq : na, "Equilibrium 50%", color=color.new(color.white, 55), style=plot.style_linebr, linewidth=1)
+bgcolor(usePD and close > eq ? color.new(color.red, 96) : na, title="Premium Zone")
+bgcolor(usePD and close < eq ? color.new(color.green, 96) : na, title="Discount Zone")
+
+// ─────────────────────────── STATS TABLE ──────────────────────────────
+var table stats = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 20), border_width=1, border_color=color.new(color.white, 70), frame_width=1, frame_color=color.new(color.white, 70))
+
+if barstate.islast
+    table.cell(stats, 0, 0, "⚡ LH STRATEGY", text_color=color.white, bgcolor=color.new(#00B8D4, 0), text_size=size.normal)
+    table.cell(stats, 1, 0, "BACKTEST", text_color=color.white, bgcolor=color.new(#00B8D4, 0), text_size=size.normal)
+    table.cell(stats, 0, 1, "Net Profit", text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 1, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.new(#00E5FF, 0) : color.new(#FF3D71, 0), text_size=size.small)
+    table.cell(stats, 0, 2, "Closed Trades", text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 2, str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.small)
+    table.cell(stats, 0, 3, "Equity", text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 3, str.tostring(strategy.equity, "#.##"), text_color=color.white, text_size=size.small)
+    table.cell(stats, 0, 4, "Position", text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 4, strategy.position_size > 0 ? "▲ LONG" : strategy.position_size < 0 ? "▼ SHORT" : "— Flat", text_color=strategy.position_size > 0 ? color.new(#00E5FF, 0) : strategy.position_size < 0 ? color.new(#FF3D71, 0) : color.white, text_size=size.small)
