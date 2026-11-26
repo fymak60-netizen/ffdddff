@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ليل طويل — تداول + أغنية + أرقيلة إلكترونية</title>
+<meta name="description" content="وصفة الليلة: تداول هادئ، أغنية على قد المزاج، وأرقيلة إلكترونية… والليل يطول. أحلى شي شعور لا يوصف." />
+<meta name="theme-color" content="#080a1a" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&family=Reem+Kufi:wght@400;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div class="grain" aria-hidden="true"></div>
+<div class="aurora" aria-hidden="true">
+  <span class="blob b1"></span>
+  <span class="blob b2"></span>
+  <span class="blob b3"></span>
+</div>
+
+<header class="nav">
+  <a class="brand" href="#top">
+    <span class="brand-dot"></span>
+    <span>ليل طويل</span>
+  </a>
+  <nav class="nav-links" aria-label="التنقل">
+    <a href="#recipe">الوصفة</a>
+    <a href="#music">الأغنية</a>
+    <a href="#hookah">الأرقيلة</a>
+    <a href="#timeline">جدول الليل</a>
+  </nav>
+  <button class="pill-btn" id="nightMode" type="button" aria-pressed="false">
+    <span class="pill-icon">☾</span> <span id="nightModeLabel">ليل هادئ</span>
+  </button>
+</header>
+
+<main id="top">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero">
+    <img class="hero-bg" src="assets/hero.jpg" alt="سطح في الليل: أرقيلة إلكترونية تتوهج، سماعات، وأضواء مدينة بعيدة" />
+    <div class="hero-veil" aria-hidden="true"></div>
+
+    <div class="hero-inner">
+      <p class="eyebrow">وصفة الليلة · ٤ عناصر فقط</p>
+
+      <h1 class="hero-title">
+        <span class="word">تداول</span>
+        <span class="plus">+</span>
+        <span class="word">أغنية</span>
+        <span class="plus">+</span>
+        <span class="word">أرقيلة</span>
+        <span class="plus">+</span>
+        <span class="word">ليل طويل</span>
+      </h1>
+
+      <p class="hero-sub">
+        أحلى شي <em>شعور لا يوصف</em> — شارتات تتحرك ببطء،
+        ومزاج على قدّ الليل، ودخان إلكتروني يرسم ألوانه في الهوا.
+      </p>
+
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#recipe">افتح الوصفة</a>
+        <button class="btn btn-ghost" id="shuffleHero" type="button">
+          🎲 اختار لي أغنية
+        </button>
+      </div>
+
+      <div class="hero-stats">
+        <div class="stat">
+          <span class="stat-num" id="clock">00:00</span>
+          <span class="stat-label">الوقت الآن</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num" id="nightLen">٧ ساعات</span>
+          <span class="stat-label">طول الليل</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num">٤</span>
+          <span class="stat-label">عناصر الوصفة</span>
+        </div>
+      </div>
+    </div>
+
+    <a class="scroll-hint" href="#recipe" aria-label="انزل للأسفل">
+      <span></span>
+    </a>
+  </section>
+
+  <!-- ============ RECIPE ============ -->
+  <section class="section" id="recipe">
+    <div class="section-head">
+      <p class="eyebrow">المكوّنات</p>
+      <h2>أربع حاجات، وليلة كاملة</h2>
+      <p class="lead">
+        مو لازم تفخّم السهرة. كل ما تحتاجه بسيط، والسر كله في <b>الترتيب</b>.
+      </p>
+    </div>
+
+    <div class="cards">
+      <article class="card" data-accent="#38e8c8">
+        <div class="card-glow" aria-hidden="true"></div>
+        <span class="card-num">٠١</span>
+        <h3>تداول هادئ</h3>
+        <p>
+          شارت واحد، فريم كبير، وقرار واحد. لا تشتغل بالليل كأنك في بورصة،
+          اشتغل كأنك تقرا كتاب.
+        </p>
+        <ul class="ticks">
+          <li>فريم ٤ ساعات أو أعلى</li>
+          <li>ستوب لوس قبل الدخول</li>
+          <li>لا رافعة عالية بعد منتصف الليل</li>
+        </ul>
+      </article>
+
+      <article class="card" data-accent="#8b7bff">
+        <div class="card-glow" aria-hidden="true"></div>
+        <span class="card-num">٠٢</span>
+        <h3>أغنية على قد المزاج</h3>
+        <p>
+          الأغنية الصح تغيّر إيقاع الليل كله. شي هادي، شي دافئ،
+          شي يخليك تطالع السما وتنسى الشارت دقيقة.
+        </p>
+        <ul class="ticks">
+          <li>قائمة تشغيل واحدة فقط</li>
+          <li>من غير «التالي» كل دقيقة</li>
+          <li>صوت واطي، إحساس عالي</li>
+        </ul>
+      </article>
+
+      <article class="card" data-accent="#ff7ad9">
+        <div class="card-glow" aria-hidden="true"></div>
+        <span class="card-num">٠٣</span>
+        <h3>أرقيلة إلكترونية</h3>
+        <p>
+          نفس الطقس، صفر رماد وصفر رِيحة. نكهة خفيفة، نَفَس طويل،
+          ولون نيون يمشي مع الصوت.
+        </p>
+        <ul class="ticks">
+          <li>نيكوتين أقل، متعة أكثر</li>
+          <li>بطارية مشحونة قبل ما تبدأ</li>
+          <li>شرب ماي بين كل نَفَس</li>
+        </ul>
+      </article>
+
+      <article class="card" data-accent="#ffc46b">
+        <div class="card-glow" aria-hidden="true"></div>
+        <span class="card-num">٠٤</span>
+        <h3>ليل طويل</h3>
+        <p>
+          ما فيه سهرة حلوة بلا وقت مفتوح. اطفِ إشعارات الشغل،
+          وسيب الليل يمشي على راحته.
+        </p>
+        <ul class="ticks">
+          <li>وضع الطيران بعد الـ ١٢</li>
+          <li>إضاءة دافئة بدل البيضاء</li>
+          <li>نافذة مفتوحة، هوا نضيف</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ MUSIC ============ -->
+  <section class="section split" id="music">
+    <div class="split-text">
+      <p class="eyebrow">المكوّن الثاني</p>
+      <h2>قائمة تشغيل الليل</h2>
+      <p class="lead">
+        اضغط أي مقطع يفتح لك بحث يوتيوب بنفس الاسم، أو خلّ الجهاز يختار لك
+        بالحظ. القائمة كلها مزاج واحد: هدوء + نبض خفيف.
+      </p>
+
+      <div class="mood">
+        <label for="moodRange">مزاج الليلة: <b id="moodName">هادي</b></label>
+        <input id="moodRange" type="range" min="0" max="2" step="1" value="0" />
+        <div class="mood-tags" aria-hidden="true">
+          <span>هادي</span><span>دافئ</span><span>على نار</span>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="pickSong" type="button">🎧 اختار لي دلوقتي</button>
+      <p class="pick-result" id="pickResult" aria-live="polite">لسه ما اخترنا…</p>
+    </div>
+
+    <div class="playlist" id="playlist">
+      <!-- rows are rendered by script.js -->
+    </div>
+  </section>
+
+  <!-- ============ HOOKAH ============ -->
+  <section class="section" id="hookah">
+    <div class="section-head">
+      <p class="eyebrow">المكوّن الثالث</p>
+      <h2>الأرقيلة الإلكترونية</h2>
+      <p class="lead">اختار النكهة، وشوف اللون كيف يغيّر جو السهرة.</p>
+    </div>
+
+    <div class="hookah-stage">
+      <div class="device" id="device" aria-hidden="true">
+        <div class="smoke">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="body">
+          <div class="body-light"></div>
+          <div class="body-mouth"></div>
+        </div>
+        <div class="base-shadow"></div>
+      </div>
+
+      <div class="flavors">
+        <div class="flavor-buttons" role="group" aria-label="النكهات">
+          <button class="flavor is-active" data-color="#38e8c8" data-name="نعناع بارد" type="button">
+            <span class="dot" style="--c:#38e8c8"></span> نعناع بارد
+          </button>
+          <button class="flavor" data-color="#8b7bff" data-name="عنب بنفسجي" type="button">
+            <span class="dot" style="--c:#8b7bff"></span> عنب بنفسجي
+          </button>
+          <button class="flavor" data-color="#ff7ad9" data-name="توت وردي" type="button">
+            <span class="dot" style="--c:#ff7ad9"></span> توت وردي
+          </button>
+          <button class="flavor" data-color="#ffc46b" data-name="مانجا دافئ" type="button">
+            <span class="dot" style="--c:#ffc46b"></span> مانجا دافئ
+          </button>
+        </div>
+
+        <table class="specs">
+          <tbody>
+            <tr><th>النكهة الحالية</th><td id="flavorName">نعناع بارد</td></tr>
+            <tr><th>النَفَس</th><td id="puffCount">0</td></tr>
+            <tr><th>الشحن</th><td><span class="battery"><i id="batteryBar" style="width:100%"></i></span></td></tr>
+          </tbody>
+        </table>
+
+        <button class="btn btn-primary" id="puffBtn" type="button">خُد نَفَس 💨</button>
+        <p class="fineprint">
+          للبالغين فقط (٢١+/١٨+). هذه صفحة مزاج ومحتوى ترفيهي،
+          وما فيها أي ترويج لمنتجات تبغ تقليدية.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TIMELINE ============ -->
+  <section class="section" id="timeline">
+    <div class="section-head">
+      <p class="eyebrow">الترتيب</p>
+      <h2>جدول الليل الطويل</h2>
+      <p class="lead">من غروب الشمس لآخر نَفَس قبل الفجر — كل مرحلة لها مزاجها.</p>
+    </div>
+
+    <ol class="timeline">
+      <li>
+        <span class="t">٢١:٠٠</span>
+        <div>
+          <h3>الترتيب</h3>
+          <p>قرايفون، سبيكر، ركن مريح، ولون إضاءة دافئ. خلّص كل شي قبل ما تجلس.</p>
+        </div>
+      </li>
+      <li>
+        <span class="t">٢٢:٠٠</span>
+        <div>
+          <h3>أول مراجعة للشارت</h3>
+          <p>نظرة سريعة على الفريم الكبير، خطّط دخولك، وحدّد مستوياتك. وبس.</p>
+        </div>
+      </li>
+      <li>
+        <span class="t">٢٣:٣٠</span>
+        <div>
+          <h3>الأغنية تبدأ</h3>
+          <p>اضغط play، اقفل الجوال، وابدأ أرّقلة النعناع البارد.</p>
+        </div>
+      </li>
+      <li>
+        <span class="t">١٢:٠٠</span>
+        <div>
+          <h3>منتصف الليل</h3>
+          <p>من هنا يبدأ الشعور اللي ما يوصف: المدينة ساكتة وإنت صاحي.</p>
+        </div>
+      </li>
+      <li>
+        <span class="t">٠٢:٠٠</span>
+        <div>
+          <h3>آخر قرار</h3>
+          <p>لا صفقات جديدة. بس متابعة، وقهوة خفيفة، ونكهة تتغيّر.</p>
+        </div>
+      </li>
+      <li>
+        <span class="t">٠٤:٣٠</span>
+        <div>
+          <h3>قبل الفجر</h3>
+          <p>اقفل الشاشات، افتح النافذة، خلّي الهوا ياخذ آخر دخان. وصحّي متأخر.</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ============ QUOTE ============ -->
+  <section class="quote-band">
+    <p class="quote-mark" aria-hidden="true">”</p>
+    <blockquote>
+      أحلى شي في الدنيا… <b>شعور لا يوصف</b>.
+      <br />
+      ليل طويل، صوت واطي، ونَفَس على راحتك.
+    </blockquote>
+    <p class="quote-by">— ليل طويل</p>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div>
+      <span class="brand-dot"></span>
+      <b>ليل طويل</b>
+      <p>صفحة مزاج · تداول مسؤول · للبالغين فقط</p>
+    </div>
+    <p class="disclaimer">
+      التداول فيه مخاطرة وقد تخسر رأس مالك. المحتوى هنا ترفيهي وليس نصيحة مالية.
+    </p>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
